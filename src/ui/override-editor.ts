@@ -531,7 +531,7 @@ const createBlockList = (
       for (const item of nested.colors) {
         const tier = item.id.slice("colors.".length) as TierName;
         const hex = block.colors?.[tier] ?? base.colors[tier];
-        const label = TIERS.find((t) => t.key === tier)!.label;
+        const label = TIERS.find((t) => t.key === tier)?.label ?? tier;
         item.label = `${coloredBlock(hex)} ${label}`;
         item.currentValue = block.colors?.[tier] ?? BASE;
       }
