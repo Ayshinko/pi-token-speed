@@ -267,5 +267,15 @@ describe("TokenSpeedEngine", () => {
       engine.recordDelta("x");
       expect(engine.tokenCount).toBe(0);
     });
+
+    it("can stop before initialization", () => {
+      const engine = new TokenSpeedEngine();
+      expect(() => engine.stop()).not.toThrow();
+    });
+
+    it("can start before initialization", () => {
+      const engine = new TokenSpeedEngine();
+      expect(() => engine.start()).not.toThrow();
+    });
   });
 });
