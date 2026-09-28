@@ -1,6 +1,31 @@
 import { Input, visibleWidth } from "@earendil-works/pi-tui";
 import { Validator } from "../config/validation";
 
+/** Maximum length for a hex color string (#RRGGBB = 7 chars). */
+const MAX_HEX_LENGTH = 7;
+
+/**
+ * Returns true when `data` consists solely of characters valid for a hex
+ * color input (`#` and `0-9A-Fa-f`).  Returns false for control sequences,
+ * escape keys, or any non-hex printable characters — these are always
+ * passed through to the parent so navigation, deletion, undo, paste, etc.
+ * continue to work normally.
+ */
+function isHexCharacterInsert(data: string): boolean {
+  // Control sequences (arrow keys, function keys, bracketed paste, etc.)
+  if (data.startsWith("\x1b")) return false;
+  // Control characters (C0, DEL, C1)
+  if (
+    [...data].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return code < 32 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
+    })
+  )
+    return false;
+  // Must be only valid hex color characters
+  return /^[#0-9A-Fa-f]+$/.test(data);
+}
+
 /**
  * Single-line input that live-previews hex color values: the moment the
  * typed value forms a valid `#RRGGBB` string, the text (including the
@@ -28,6 +53,36 @@ export class HexColorInput extends Input {
     // rendered-line splicing below needs its plain-text extent. Note:
     // the prompt must be a plain (escape-free) string for this to work.
     this.promptText = options?.prompt ?? "> ";
+  }
+
+  /**
+   * Override to restrict input to valid hex color characters (`#` and
+   * `0-9A-Fa-f`) and enforce a maximum of 7 characters.  Navigation,
+   * deletion, undo, paste, and other editor commands pass through
+   * (the parent class handles keybindings before rejecting stray
+   * control characters).
+   */
+  override handleInput(data: string): void {
+    // Escape sequences: always pass through (arrow keys, function keys, etc.)
+    if (data.startsWith("\x1b")) {
+      super.handleInput(data);
+      return;
+    }
+    // Control characters (C0, DEL, C1): pass through (parent handles
+    // keybindings like backspace/delete, then ignores stray chars)
+    if (
+      [...data].some((ch) => {
+        const code = ch.charCodeAt(0);
+        return code < 32 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
+      })
+    ) {
+      super.handleInput(data);
+      return;
+    }
+    // Printable characters: validate and limit
+    if (!isHexCharacterInsert(data)) return; // reject non-hex
+    if (this.getValue().length >= MAX_HEX_LENGTH) return; // reject over limit
+    super.handleInput(data);
   }
 
   override render(width: number): string[] {
