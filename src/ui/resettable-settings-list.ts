@@ -1,3 +1,4 @@
+import type { TUI } from "@earendil-works/pi-tui";
 import {
   SettingsList,
   truncateToWidth,
@@ -8,8 +9,7 @@ import {
 /**
  * SettingsList with an `r` shortcut: "return to default" for the
  * selected row. What a reset means (drop an override key, restore a
- * built-in default, …) is decided by the `onReset` callback — this
- * class only routes the keypress and advertises the shortcut.
+ * built-in default, …) is decided by the `onReset` callback.
  *
  * The base class ignores unrecognized keys and delegates all input to
  * the active submenu when one is open, so `r` only triggers a reset on
@@ -19,6 +19,8 @@ import {
 export class ResettableSettingsList extends SettingsList {
   /** Saved for re-rendering the advertised hint line in `render`. */
   private readonly hintTheme: SettingsListTheme;
+  /** TUI instance for post-reset re-render. */
+  private readonly tui: TUI;
 
   constructor(
     items: SettingItem[],
@@ -26,17 +28,24 @@ export class ResettableSettingsList extends SettingsList {
     theme: SettingsListTheme,
     onChange: (id: string, newValue: string) => void,
     onCancel: () => void,
-    private readonly onReset: (id: string) => void,
+    onReset: (id: string) => void,
+    tui: TUI,
   ) {
     super(items, maxVisible, theme, onChange, onCancel);
     this.hintTheme = theme;
+    this.tui = tui;
+    this.onReset = onReset;
   }
+
+  /** The reset callback (stored for the handleInput override). */
+  private onReset: (id: string) => void;
 
   override handleInput(data: string): void {
     if (data === "r" && !this.hasOpenSubmenu()) {
       const item = this.getSelectedItem();
       if (item) {
         this.onReset(item.id);
+        this.tui.requestRender();
         return;
       }
     }

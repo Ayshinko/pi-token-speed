@@ -55,6 +55,8 @@ export class CommandManager {
   private settingsList: SettingsList | null = null;
   private colorSubmenuItems: SettingItem[] | null = null;
   private thresholdSubmenuItems: SettingItem[] | null = null;
+  /** Currently active submenu SettingsList (colors or thresholds). */
+  private activeSubmenuList: SettingsList | null = null;
 
   constructor(
     private readonly renderer: Renderer,
@@ -124,6 +126,7 @@ export class CommandManager {
         async (id, newValue) => this.handleSettingChange(id, newValue, ctx),
         done,
         ctx,
+        tui,
       );
       return this.settingsList;
     });
@@ -380,6 +383,7 @@ export class CommandManager {
    * @param onChange Callback when a setting value changes
    * @param onClose Callback when the dialog closes
    * @param ctx The command context (for `resetSetting`)
+   * @param tui The TUI instance
    * @returns The configured SettingsList instance
    */
   private createSettingsList(
@@ -387,6 +391,7 @@ export class CommandManager {
     onChange: (id: string, newValue: string) => void,
     onClose: () => void,
     ctx: ExtensionCommandContext,
+    tui: TUI,
   ): SettingsList {
     return new ResettableSettingsList(
       items,
@@ -397,6 +402,7 @@ export class CommandManager {
       (id) => {
         void this.resetSetting(id, ctx);
       },
+      tui,
     );
   }
 
@@ -408,26 +414,34 @@ export class CommandManager {
    *
    * @param items The settings items to display
    * @param ctx The command context (for `handleSettingChange`)
-   * @param onClose Callback when the dialog closes
+   * @param tui The TUI instance
+   * @param done Callback when the dialog closes
    * @returns The configured SettingsList instance
    */
   private createSubmenuList(
     items: SettingItem[],
     ctx: ExtensionCommandContext,
+    tui: TUI,
     done: (value?: string) => void,
   ): SettingsList {
-    return new ResettableSettingsList(
+    const list = new ResettableSettingsList(
       items,
       Math.min(items.length + 2, 15),
       getSettingsListTheme(),
       (id, newValue) => {
         this.handleSettingChange(id, newValue, ctx);
       },
-      () => done(undefined),
+      () => {
+        this.activeSubmenuList = null;
+        done(undefined);
+      },
       (id) => {
         void this.resetSetting(id, ctx);
       },
+      tui,
     );
+    this.activeSubmenuList = list;
+    return list;
   }
 
   /**
@@ -446,7 +460,7 @@ export class CommandManager {
       this.settingsList.updateValue("thresholds", allThresholds);
     }
 
-    // Update submenu's threshold rows
+    // Update submenu's threshold rows and trigger re-render
     if (this.thresholdSubmenuItems) {
       for (const { key } of TIERS) {
         const item = this.thresholdSubmenuItems.find(
@@ -456,6 +470,16 @@ export class CommandManager {
           item.currentValue = thresholds[key].toString();
         }
       }
+    }
+    // Also update the active submenu's items and invalidate
+    if (this.activeSubmenuList) {
+      for (const { key } of TIERS) {
+        this.activeSubmenuList.updateValue(
+          `thresholds.${key}`,
+          thresholds[key].toString(),
+        );
+      }
+      this.activeSubmenuList.invalidate();
     }
   }
 
@@ -489,6 +513,27 @@ export class CommandManager {
           item.label = `${coloredBlock(colors[key])} ${label}`;
         }
       }
+    }
+    // Also update the active submenu's items and trigger re-render
+    if (this.activeSubmenuList) {
+      for (const { key, label } of TIERS) {
+        this.activeSubmenuList.updateValue(`colors.${key}`, colors[key]);
+        // Update the label with the colored block (needs private items access)
+        const internalItems = (
+          this.activeSubmenuList as unknown as {
+            items: SettingItem[];
+          }
+        ).items;
+        if (internalItems) {
+          const item = internalItems.find(
+            (i: SettingItem) => i.id === `colors.${key}`,
+          );
+          if (item) {
+            item.label = `${coloredBlock(colors[key])} ${label}`;
+          }
+        }
+      }
+      this.activeSubmenuList.invalidate();
     }
   }
 
@@ -586,7 +631,7 @@ export class CommandManager {
         submenu: (_currentValue: string, done: (value?: string) => void) => {
           const items = buildThresholdSettingsItems(theme, tui);
           this.thresholdSubmenuItems = items;
-          return this.createSubmenuList(items, ctx, done);
+          return this.createSubmenuList(items, ctx, tui, done);
         },
       },
       {
@@ -597,7 +642,7 @@ export class CommandManager {
         submenu: (_currentValue: string, done: (value?: string) => void) => {
           const items = buildColorSettingsItems(theme, tui);
           this.colorSubmenuItems = items;
-          return this.createSubmenuList(items, ctx, done);
+          return this.createSubmenuList(items, ctx, tui, done);
         },
       },
     ];

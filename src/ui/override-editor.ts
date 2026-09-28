@@ -430,6 +430,7 @@ const buildBlockItems = (
         commit,
         () => submenuDone(undefined),
         (id) => commit(id, ""),
+        tui,
       );
     },
   });
@@ -472,6 +473,7 @@ const buildBlockItems = (
         commit,
         () => submenuDone(undefined),
         (id) => commit(id, ""),
+        tui,
       );
     },
   });
@@ -597,6 +599,7 @@ const createBlockList = (
       done();
     },
     resetField,
+    tui,
   );
 };
 
@@ -763,6 +766,7 @@ export class OverridesEditor implements Component, Focusable {
           this.getProviderIds()[Number(itemId.slice("provider-".length))];
         if (providerId !== undefined) this.beginReset(providerId);
       },
+      this.options.tui,
     );
   }
 
