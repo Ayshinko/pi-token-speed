@@ -40,6 +40,11 @@ export class ResettableSettingsList extends SettingsList {
   /** The reset callback (stored for the handleInput override). */
   private onReset: (id: string) => void;
 
+  /**
+   * Handles input, intercepting `r` to trigger a reset when no submenu is open.
+   *
+   * @param data The input data string.
+   */
   override handleInput(data: string): void {
     if (data === "r" && !this.hasOpenSubmenu()) {
       const item = this.getSelectedItem();
@@ -52,6 +57,12 @@ export class ResettableSettingsList extends SettingsList {
     super.handleInput(data);
   }
 
+  /**
+   * Renders the list with an added hint advertising the `r` reset shortcut.
+   *
+   * @param width The available terminal width.
+   * @returns An array of rendered text lines.
+   */
   override render(width: number): string[] {
     const lines = super.render(width);
     // Advertise the shortcut in the standard hint line (the base class
@@ -73,10 +84,20 @@ export class ResettableSettingsList extends SettingsList {
    * class (with no public accessor); bracket access keeps this subclass
    * compilable against them.
    */
+  /**
+   * Checks whether a nested submenu component is currently open.
+   *
+   * @returns True if a submenu is active.
+   */
   private hasOpenSubmenu(): boolean {
     return this["submenuComponent"] != null;
   }
 
+  /**
+   * Retrieves the currently selected (highlighted) SettingItem.
+   *
+   * @returns The selected SettingItem, or undefined if no item is selected.
+   */
   private getSelectedItem(): SettingItem | undefined {
     return this["getDisplayItems"]()[this["selectedIndex"]];
   }

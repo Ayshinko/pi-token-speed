@@ -2,96 +2,39 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type {
-  Colors,
-  PartialConfig,
-  ProviderOverride,
-  ProviderOverrides,
-  Thresholds,
-  TierName,
-  TokenSpeedConfig,
-} from "./config-types";
-import { STATUS_KEY } from "./constants";
+import { SETTINGS_ITEMS } from "../settings/defaults";
 import {
   COLOR_BLAZING,
   COLOR_FAST,
   COLOR_MEDIUM,
   COLOR_SLOW,
-  COUNT_STRATEGY,
-  DEFAULT_ICON,
-  DISPLAY_MODE,
-  END_TPS_BEHAVIOR,
-  SLIDING_WINDOW,
+} from "../settings/items/colors/color";
+import { OverrideValidator } from "../settings/items/override-validator";
+import { SettingsRegistry } from "../settings/items/scalar";
+import {
   TPS_THRESHOLD_BLAZING,
   TPS_THRESHOLD_FAST,
   TPS_THRESHOLD_MEDIUM,
   TPS_THRESHOLD_SLOW,
-  UPDATE_INTERVAL,
-  USE_PROVIDER_TOKENS,
-} from "./defaults";
-import { Validator } from "./validation";
-
-/**
- * Legacy flat threshold keys → tier name (e.g. `tpsSlow` → `slow`).
- */
-const LEGACY_THRESHOLD_KEYS: Record<string, TierName> = {
-  tpsSlow: "slow",
-  tpsMedium: "medium",
-  tpsFast: "fast",
-  tpsBlazing: "blazing",
-};
-
-/**
- * Legacy flat color keys → tier name (e.g. `colorFast` → `fast`).
- */
-const LEGACY_COLOR_KEYS: Record<string, TierName> = {
-  colorSlow: "slow",
-  colorMedium: "medium",
-  colorFast: "fast",
-  colorBlazing: "blazing",
-};
-
-/**
- * Type guard for plain objects (excludes arrays and null).
- */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-const ALL_LEGACY_KEYS = [
-  ...Object.keys(LEGACY_THRESHOLD_KEYS),
-  ...Object.keys(LEGACY_COLOR_KEYS),
-];
+} from "../settings/items/thresholds/threshold";
+import { STATUS_KEY } from "./constants";
+import type {
+  PartialConfig,
+  ProviderOverride,
+  ProviderOverrides,
+  TokenSpeedConfig,
+} from "./types";
 
 /**
  * Manages TokenSpeed configuration: defaults, user settings, caching,
  * and persistence to ~/.pi/agent/settings.json.
  *
- * Delegates validation to the `Validator` utility class.
- *
- * Use the exported `settings` singleton — do not instantiate directly.
- *
- * Settings shape:
- * - Thresholds and colors are stored as nested objects
- *   (`thresholds.slow`, `colors.fast`, …), all keys optional.
- * - `providerOverrides` maps a pi ProviderId (e.g. "anthropic") to a
- *   partial config applied when the active model's provider matches.
- *   Blocks are stored verbatim (sanitized); resolution is lazy via
- *   `getEffectiveConfig(providerId)`.
- * - Legacy flat keys (`tpsSlow`, `colorFast`, …) are still readable for
- *   backward compatibility, but the file is never rewritten at read time.
- *   They are stripped from the file on the next write, which only happens
- *   when the user stores a value via the `/tps` menu (auto-migration).
- *
- * Token counting behavior:
- * - Text/thinking deltas: Counted as 1 token (direct) or estimated from content (estimate)
- * - Toolcall deltas (edit/write): Counted as 1 token (direct) or estimated from content (estimate)
- * - Other toolcalls: Not counted (prompt processing, not relevant)
+ * Delegates single-field validation to each `SettingItem`'s `check()` method
+ * and cross-field validation to standalone functions.
  */
 class Settings {
   private cachedConfig: TokenSpeedConfig | null = null;
   private cachedErrors: string[] = [];
-  private legacyKeys: string[] = [];
 
   /**
    * @internal Use the exported `settings` singleton instead.
@@ -102,10 +45,18 @@ class Settings {
 
   /**
    * Retrieves the default configuration object.
+   * Derives scalar defaults from registered `SettingsItem` instances —
+   * one source of truth.
    *
    * @returns The default configuration.
    */
   getDefaultConfig(): TokenSpeedConfig {
+    const scalars = Object.fromEntries(
+      Object.values(SettingsRegistry.ITEMS).map((item) => [
+        item.id,
+        (item as any).getDefault(),
+      ]),
+    );
     return {
       thresholds: {
         slow: TPS_THRESHOLD_SLOW,
@@ -119,46 +70,62 @@ class Settings {
         fast: COLOR_FAST,
         blazing: COLOR_BLAZING,
       },
-      slidingWindow: SLIDING_WINDOW,
-      display: DISPLAY_MODE,
-      useProviderTokens: USE_PROVIDER_TOKENS,
-      countStrategy: COUNT_STRATEGY,
-      endTpsBehavior: END_TPS_BEHAVIOR,
-      icon: DEFAULT_ICON,
-      updateInterval: UPDATE_INTERVAL,
       providerOverrides: {},
-    };
+      ...scalars,
+    } as TokenSpeedConfig;
   }
 
   /**
-   * Initializes the config values
+   * Initializes the config by reading the settings file, merging with
+   * defaults, and validating. Caches the result for subsequent reads.
+   *
+   * @returns The resolved and validated TokenSpeedConfig.
    */
   async initialize(): Promise<TokenSpeedConfig> {
     const defaults = this.getDefaultConfig();
     const raw = await this.readUserSettings();
 
-    // Detect and convert legacy keys in memory only — the file is
-    // untouched until the next write (which only happens via /tps).
-    this.legacyKeys = ALL_LEGACY_KEYS.filter((key) => raw[key] !== undefined);
-    const { converted, rest } = this.splitLegacy(raw);
-
-    const merged = Settings.mergeConfig(
-      { ...defaults, ...rest } as PartialConfig,
-      converted,
-    );
-
     // Sanitize per-provider overrides: drop malformed entries and invalid
     // keys (collecting prefixed warnings), keeping valid blocks verbatim so
     // resolution via getEffectiveConfig() stays lazy.
     const { overrides: providerOverrides, errors: overrideErrors } =
-      this.sanitizeProviderOverrides(raw, merged);
-    merged.providerOverrides = providerOverrides;
+      this.sanitizeProviderOverrides(raw, defaults);
 
-    const { config, errors } = Validator.validate(merged);
+    const merged = Settings.mergeConfig(defaults, {
+      ...raw,
+      providerOverrides,
+    });
+
+    const { config, errors } = this.validateConfig(merged);
     this.cachedConfig = config;
     this.cachedErrors = [...errors, ...overrideErrors];
 
     return this.cachedConfig;
+  }
+
+  /**
+   * Validates the base config, delegating to each SettingItem.
+   * Group items (thresholds, colors) act as composites that validate
+   * their children.
+   */
+  validateConfig(config: TokenSpeedConfig): {
+    config: TokenSpeedConfig;
+    errors: string[];
+  } {
+    const response = { ...config };
+    const errors: string[] = [];
+
+    for (const item of Object.values(SETTINGS_ITEMS)) {
+      const result = item.validate(response[item.id as keyof TokenSpeedConfig]);
+      if (!result.valid && result.errors) {
+        errors.push(...result.errors);
+      }
+      if (result.corrected !== undefined) {
+        (response as any)[item.id] = result.corrected;
+      }
+    }
+
+    return { config: response, errors };
   }
 
   /**
@@ -175,8 +142,10 @@ class Settings {
   getEffectiveConfig(providerId?: string): TokenSpeedConfig {
     const base = this.getConfig();
     if (!providerId) return base;
+
     const override = base.providerOverrides[providerId];
     if (!override) return base;
+
     return Settings.mergeConfig(base, override as PartialConfig);
   }
 
@@ -205,23 +174,15 @@ class Settings {
   }
 
   /**
-   * Returns the legacy keys found in the settings file during the last
-   * initialization. Empty once the file has been rewritten without them.
-   */
-  getLegacyKeys(): string[] {
-    return this.legacyKeys;
-  }
-
-  /**
+   *
    * Writes a partial TokenSpeedConfig and updates the cache.
-   * Legacy keys are stripped from the stored block, migrating the file
-   * to the nested format.
+   *
+   * @param partial The partial config to merge and persist.
    */
   async setConfig(partial: PartialConfig): Promise<void> {
     await this.writeUserSettings(partial);
     const current = this.cachedConfig || this.getDefaultConfig();
     this.cachedConfig = Settings.mergeConfig(current, partial);
-    this.legacyKeys = [];
   }
 
   /**
@@ -243,59 +204,13 @@ class Settings {
   }
 
   /**
-   * Splits a raw settings block into converted legacy values (nested
-   * `thresholds`/`colors` partials, new-format keys winning) and the
-   * remainder with the nested groups and every legacy key removed.
-   */
-  private splitLegacy(block: Record<string, unknown>): {
-    converted: { thresholds?: Partial<Thresholds>; colors?: Partial<Colors> };
-    rest: Record<string, unknown>;
-  } {
-    const converted = this.convertLegacyKeys(block);
-    const rest: Record<string, unknown> = { ...block };
-    for (const key of ["thresholds", "colors", ...ALL_LEGACY_KEYS]) {
-      delete rest[key];
-    }
-    return { converted, rest };
-  }
-
-  /**
-   * Converts legacy flat keys (`tpsSlow`, `colorFast`, …) into nested
-   * `thresholds`/`colors` partials. New-format keys take precedence over
-   * coexisting legacy keys for the same tier.
-   */
-  private convertLegacyKeys(block: Record<string, unknown>): {
-    thresholds?: Partial<Thresholds>;
-    colors?: Partial<Colors>;
-  } {
-    const thresholds: Partial<Thresholds> = {};
-    const colors: Partial<Colors> = {};
-
-    for (const [key, tier] of Object.entries(LEGACY_THRESHOLD_KEYS)) {
-      const value = block[key];
-      if (typeof value === "number") thresholds[tier] = value;
-    }
-    for (const [key, tier] of Object.entries(LEGACY_COLOR_KEYS)) {
-      const value = block[key];
-      if (typeof value === "string") colors[tier] = value;
-    }
-
-    const nestedThresholds = this.readNestedGroup<Thresholds>(
-      block,
-      "thresholds",
-    );
-    const nestedColors = this.readNestedGroup<Colors>(block, "colors");
-
-    return {
-      // Nested (new-format) keys win over converted legacy values
-      thresholds: { ...thresholds, ...nestedThresholds },
-      colors: { ...colors, ...nestedColors },
-    };
-  }
-
-  /**
    * Safely reads a nested object group (e.g. `thresholds`, `colors`,
    * `tokenSpeed`) from a raw block.
+   *
+   * @param block The raw settings block to read from.
+   * @param group The key of the nested group to extract.
+   * @returns A partial object of the group, or an empty object if the
+   *   value is missing, null, or an array.
    */
   private readNestedGroup<T extends object>(
     block: Record<string, unknown>,
@@ -327,23 +242,22 @@ class Settings {
     const rawValue = raw.providerOverrides;
     if (rawValue === undefined) return { overrides, errors };
 
-    if (!isPlainObject(rawValue)) {
+    if (!this.isPlainObject(rawValue)) {
       errors.push("- providerOverrides must be an object — ignoring.");
       return { overrides, errors };
     }
 
     for (const [providerId, block] of Object.entries(rawValue)) {
-      if (!isPlainObject(block)) {
+      if (!this.isPlainObject(block)) {
         errors.push(
           `- providerOverrides["${providerId}"] must be an object — entry ignored.`,
         );
         continue;
       }
-      const { config, errors: blockErrors } = Validator.validateOverride(
+      const { config, errors: blockErrors } = new OverrideValidator(
         providerId,
-        block as ProviderOverride,
         base,
-      );
+      ).validate(block as ProviderOverride);
       errors.push(...blockErrors);
       overrides[providerId] = config;
     }
@@ -353,6 +267,9 @@ class Settings {
 
   /**
    * Reads and parses the settings file, returning an empty object on failure.
+   *
+   * @returns The parsed JSON object, or an empty object if the file is
+   *   missing or invalid.
    */
   private async readSettings(): Promise<Record<string, unknown>> {
     try {
@@ -365,6 +282,8 @@ class Settings {
 
   /**
    * Writes a JSON object to the settings file with 2-space indentation.
+   *
+   * @param data The object to serialize and write.
    */
   private async writeSettings(data: Record<string, unknown>): Promise<void> {
     await writeFile(this.settingsPath, JSON.stringify(data, null, 2), "utf-8");
@@ -382,13 +301,11 @@ class Settings {
 
   /**
    * Writes a partial TokenSpeedConfig to ~/.pi/agent/settings.json,
-   * merging it with existing values and stripping every legacy key
-   * (auto-migration to the nested format).
+   * merging it with existing values.
    *
    * Only explicitly-set values are persisted: the partial should contain
-   * just the keys/tiers the user changed (nested groups are merged per-tier),
-   * plus converted legacy keys during migration. Defaults are never written
-   * unless the user explicitly sets them.
+   * just the keys/tiers the user changed (nested groups are merged per-tier).
+   * Defaults are never written unless the user explicitly sets them.
    *
    * @param partial The partial TokenSpeedConfig to write.
    */
@@ -397,19 +314,13 @@ class Settings {
     const raw =
       this.readNestedGroup<Record<string, unknown>>(settings, STATUS_KEY) || {};
 
-    // Convert any legacy keys on disk into the nested format (new keys
-    // winning), so stripping them below never loses stored values.
-    const { converted, rest } = this.splitLegacy(raw);
-
-    // Only explicitly-set values are persisted: the nested groups come from
-    // converted legacy keys (explicit in a previous format) merged per-tier
-    // with whatever the partial contains (the tiers the user just changed
-    // via /tps). Values equal to their defaults are still written if the
-    // user sets them explicitly.
-    const block = Settings.mergeConfig(rest, {
+    const block = Settings.mergeConfig(raw as PartialConfig, {
       ...partial,
-      thresholds: { ...converted.thresholds, ...partial.thresholds },
-      colors: { ...converted.colors, ...partial.colors },
+      thresholds: {
+        ...(raw.thresholds as Record<string, unknown>),
+        ...partial.thresholds,
+      },
+      colors: { ...(raw.colors as Record<string, unknown>), ...partial.colors },
     }) as unknown as Record<string, unknown>;
 
     // Omit empty groups
@@ -429,7 +340,16 @@ class Settings {
       delete settings[STATUS_KEY];
     }
     await this.writeSettings(settings);
-    this.legacyKeys = [];
+  }
+
+  /**
+   * Checks whether `value` is a plain object (not null, not array).
+   *
+   * @param value The value to check.
+   * @returns True if value is a plain object.
+   */
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 }
 

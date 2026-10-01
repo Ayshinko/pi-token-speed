@@ -1,15 +1,15 @@
-import type {
-  CountStrategy,
-  EndTpsBehavior,
-  TokenSpeedConfig,
-} from "../config/config-types";
-import {
-  COUNT_STRATEGY,
-  END_TPS_BEHAVIOR,
-  SLIDING_WINDOW,
-  USE_PROVIDER_TOKENS,
-} from "../config/defaults";
 import { settings } from "../config/settings";
+import type { TokenSpeedConfig } from "../config/types";
+import {
+  COUNT_STRATEGY_DEFAULT,
+  type CountStrategy,
+} from "../settings/items/count-strategy";
+import {
+  END_TPS_BEHAVIOR_DEFAULT,
+  type EndTpsBehavior,
+} from "../settings/items/end-tps-behavior";
+import { SLIDING_WINDOW_DEFAULT } from "../settings/items/sliding-window";
+import { USE_PROVIDER_TOKENS_DEFAULT } from "../settings/items/use-provider-tokens";
 import { SlidingWindow } from "./sliding-window";
 
 const TOKEN_REGEX = /\w+|[^\s\w]/g;
@@ -32,13 +32,13 @@ export class TokenSpeedEngine {
   private _countedUsageOutput = 0;
 
   private _slidingWindow: SlidingWindow;
-  private _useProviderTokens = USE_PROVIDER_TOKENS;
-  private _countStrategy: CountStrategy = COUNT_STRATEGY;
-  private _endTpsBehavior: EndTpsBehavior = END_TPS_BEHAVIOR;
+  private _useProviderTokens = USE_PROVIDER_TOKENS_DEFAULT;
+  private _countStrategy: CountStrategy = COUNT_STRATEGY_DEFAULT;
+  private _endTpsBehavior: EndTpsBehavior = END_TPS_BEHAVIOR_DEFAULT;
   private _providerId: string | undefined;
 
   constructor() {
-    this._slidingWindow = new SlidingWindow(SLIDING_WINDOW);
+    this._slidingWindow = new SlidingWindow(SLIDING_WINDOW_DEFAULT);
   }
 
   /**

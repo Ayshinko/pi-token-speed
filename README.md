@@ -66,7 +66,7 @@ You can customize the display, speed thresholds and colors by adding a `tokenSpe
 }
 ```
 
-All keys are optional. If you're still using the old flat keys (`tpsSlow`, `colorFast`, …), see [Legacy Configuration](#legacy-configuration).
+All keys are optional.
 
 ### Provider Overrides
 
@@ -113,27 +113,6 @@ You can also manage overrides interactively with `/tps overrides` (see [Commands
 ### Configuration Validation
 
 Invalid configuration values are automatically corrected to their defaults. A warning notification is displayed in the Pi status bar at session start listing any corrections made. The `slidingWindow` value is also clamped between `100ms` and `30000ms` (30s).
-
-### Legacy Configuration
-
-Earlier versions of pi-token-speed stored thresholds and colors as flat keys:
-
-```json
-{
-  "tokenSpeed": {
-    "tpsSlow": 0,
-    "tpsMedium": 15,
-    "tpsFast": 30,
-    "tpsBlazing": 45,
-    "colorSlow": "#ff4444",
-    "colorMedium": "#ffaa00",
-    "colorFast": "#00ff88",
-    "colorBlazing": "#44ddff"
-  }
-}
-```
-
-These keys are still honored, so your configuration keeps working as-is. However, they are considered legacy: a warning notification is shown at session start while any of them are present. Once you open `/tps` and store any value, the legacy keys are automatically converted to the nested `thresholds`/`colors` format and removed from the file — no manual editing needed.
 
 ### Configuration Options
 

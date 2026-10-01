@@ -1,35 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TokenSpeedConfig } from "../src/config/config-types";
+import type { TokenSpeedConfig } from "../src/config/types";
+import { TokenSpeedEngine } from "../src/core/engine";
 import {
   COLOR_BLAZING,
   COLOR_FAST,
   COLOR_MEDIUM,
   COLOR_SLOW,
-  COUNT_STRATEGY,
-  DEFAULT_ICON,
-  DISPLAY_MODE,
-  END_TPS_BEHAVIOR,
-  SLIDING_WINDOW,
+} from "../src/settings/items/colors/color";
+import { COUNT_STRATEGY_DEFAULT } from "../src/settings/items/count-strategy";
+import { DISPLAY_MODE_DEFAULT } from "../src/settings/items/display";
+import { END_TPS_BEHAVIOR_DEFAULT } from "../src/settings/items/end-tps-behavior";
+import { DEFAULT_ICON } from "../src/settings/items/icon";
+import { SLIDING_WINDOW_DEFAULT } from "../src/settings/items/sliding-window";
+import {
   TPS_THRESHOLD_BLAZING,
   TPS_THRESHOLD_FAST,
   TPS_THRESHOLD_MEDIUM,
   TPS_THRESHOLD_SLOW,
-  UPDATE_INTERVAL,
-  USE_PROVIDER_TOKENS,
-} from "../src/config/defaults";
-import { TokenSpeedEngine } from "../src/core/engine";
+} from "../src/settings/items/thresholds/threshold";
+import { UPDATE_INTERVAL_DEFAULT } from "../src/settings/items/update-interval";
+import { USE_PROVIDER_TOKENS_DEFAULT } from "../src/settings/items/use-provider-tokens";
 
 // The real settings module reads the user's settings file at import time
 // (getAgentDir); replace it with a controllable fake.
 const fakeConfig: TokenSpeedConfig = {
-  display: DISPLAY_MODE,
-  slidingWindow: SLIDING_WINDOW,
-  useProviderTokens: USE_PROVIDER_TOKENS,
-  countStrategy: COUNT_STRATEGY,
-  endTpsBehavior: END_TPS_BEHAVIOR,
+  display: DISPLAY_MODE_DEFAULT,
+  slidingWindow: SLIDING_WINDOW_DEFAULT,
+  useProviderTokens: USE_PROVIDER_TOKENS_DEFAULT,
+  countStrategy: COUNT_STRATEGY_DEFAULT,
+  endTpsBehavior: END_TPS_BEHAVIOR_DEFAULT,
   icon: DEFAULT_ICON,
-  updateInterval: UPDATE_INTERVAL,
+  updateInterval: UPDATE_INTERVAL_DEFAULT,
   thresholds: {
     slow: TPS_THRESHOLD_SLOW,
     medium: TPS_THRESHOLD_MEDIUM,

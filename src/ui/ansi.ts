@@ -1,4 +1,4 @@
-import { Validator } from "../config/validation";
+import { isValidHex } from "../settings/items/tiers/validation";
 
 /**
  * Applies a hex color to text using 24-bit truecolor ANSI escape codes.
@@ -8,7 +8,7 @@ import { Validator } from "../config/validation";
  * @returns The colored text, or the original text if hex is invalid.
  */
 export function truecolor(text: string, hex: string): string {
-  if (!Validator.isValidHex(hex)) return text;
+  if (!isValidHex(hex)) return text;
 
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);

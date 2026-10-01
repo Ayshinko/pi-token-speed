@@ -47,21 +47,6 @@ export class EventManager {
       ctx.ui.notify(message, "warning");
     }
 
-    // Warn about legacy flat settings keys — they still work, but the file
-    // is only migrated to the nested format when the user stores a value
-    // via /tps.
-    const legacyKeys = settings.getLegacyKeys();
-    if (legacyKeys.length > 0) {
-      const message = [
-        "[pi-token-speed]",
-        `Using legacy settings keys (${legacyKeys.join(", ")}).`,
-        "They still work, but consider migrating them. Check the README for more details.",
-        "",
-        "Hint: Run /tps and store any threshold/color value (even if it's the same one) to auto-migrate to the new format.",
-      ].join("\n");
-      ctx.ui.notify(message, "warning");
-    }
-
     this.engine.initialize();
     this.engine.applyProvider(ctx.model?.provider);
     this.renderer.initialize(ctx);

@@ -1,51 +1,14 @@
 import { Input, visibleWidth } from "@earendil-works/pi-tui";
-import { Validator } from "../config/validation";
-
-/** Maximum length for a hex color string (#RRGGBB = 7 chars). */
-const MAX_HEX_LENGTH = 7;
-
-/**
- * Returns true when `data` consists solely of characters valid for a hex
- * color input (`#` and `0-9A-Fa-f`).  Returns false for control sequences,
- * escape keys, or any non-hex printable characters — these are always
- * passed through to the parent so navigation, deletion, undo, paste, etc.
- * continue to work normally.
- */
-function isHexCharacterInsert(data: string): boolean {
-  // Control sequences (arrow keys, function keys, bracketed paste, etc.)
-  if (data.startsWith("\x1b")) return false;
-  // Control characters (C0, DEL, C1)
-  if (
-    [...data].some((ch) => {
-      const code = ch.charCodeAt(0);
-      return code < 32 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
-    })
-  )
-    return false;
-  // Must be only valid hex color characters
-  return /^[#0-9A-Fa-f]+$/.test(data);
-}
+import { HEX_CHAR, isValidHex } from "../settings/items/tiers/validation";
 
 /**
  * Single-line input that live-previews hex color values: the moment the
  * typed value forms a valid `#RRGGBB` string, the text (including the
  * leading `#`) is rendered in that color — no Enter required.
- *
- * pi-tui's `Input` renders its value unstyled (its only styling hook,
- * `placeholderStyle`, applies solely to the empty-state placeholder), so
- * this subclass post-processes the rendered line: a 24-bit truecolor fg
- * escape is injected right after the prompt and reset before the trailing
- * padding. The only escapes inside the value region are the zero-width
- * `CURSOR_MARKER` and the reverse-video cursor pair (`\x1b[7m…\x1b[27m`),
- * both of which compose fine with an fg color — as a bonus, the cursor
- * block shows the chosen color as its background.
- *
- * Degradation: if pi-tui ever changes the render layout
- * (`prompt + text + padding`), this subclass degrades to "no preview",
- * not to breakage.
  */
 export class HexColorInput extends Input {
   private readonly promptText: string;
+  private readonly maxHexLength = 7;
 
   constructor(options?: { prompt?: string }) {
     super(options);
@@ -56,6 +19,23 @@ export class HexColorInput extends Input {
   }
 
   /**
+   * Returns true when `data` consists solely of characters valid for a hex
+   * color input (`#` and `0-9A-Fa-f`), rejecting control sequences and
+   * non-hex printable characters.
+   */
+  private isHexCharacterInsert(data: string): boolean {
+    if (data.startsWith("\x1b")) return false;
+    if (
+      [...data].some((ch) => {
+        const code = ch.charCodeAt(0);
+        return code < 32 || code === 0x7f || (code >= 0x80 && code <= 0x9f);
+      })
+    )
+      return false;
+    return new RegExp(`^${HEX_CHAR}+$`).test(data);
+  }
+
+  /**
    * Override to restrict input to valid hex color characters (`#` and
    * `0-9A-Fa-f`) and enforce a maximum of 7 characters.  Navigation,
    * deletion, undo, paste, and other editor commands pass through
@@ -63,13 +43,10 @@ export class HexColorInput extends Input {
    * control characters).
    */
   override handleInput(data: string): void {
-    // Escape sequences: always pass through (arrow keys, function keys, etc.)
     if (data.startsWith("\x1b")) {
       super.handleInput(data);
       return;
     }
-    // Control characters (C0, DEL, C1): pass through (parent handles
-    // keybindings like backspace/delete, then ignores stray chars)
     if (
       [...data].some((ch) => {
         const code = ch.charCodeAt(0);
@@ -79,16 +56,22 @@ export class HexColorInput extends Input {
       super.handleInput(data);
       return;
     }
-    // Printable characters: validate and limit
-    if (!isHexCharacterInsert(data)) return; // reject non-hex
-    if (this.getValue().length >= MAX_HEX_LENGTH) return; // reject over limit
+    if (!this.isHexCharacterInsert(data)) return;
+    if (this.getValue().length >= this.maxHexLength) return;
     super.handleInput(data);
   }
 
+  /**
+   * Renders the input with live hex color preview: when the value
+   * forms a valid `#RRGGBB`, the hex text is rendered in that color.
+   *
+   * @param width The available terminal width.
+   * @returns An array of rendered text lines.
+   */
   override render(width: number): string[] {
     const lines = super.render(width);
     const value = this.getValue();
-    if (!Validator.isValidHex(value)) return lines;
+    if (!isValidHex(value)) return lines;
 
     // A valid hex is always 7 ASCII chars, so the value can only be
     // horizontally scrolled when the available width can't show all 7

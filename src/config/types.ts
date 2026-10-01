@@ -1,17 +1,6 @@
-/**
- * Display mode — what information to show in the status bar.
- */
-export type DisplayMode = "tps" | "ttft" | "stats" | "full";
-
-/**
- * Count strategy — how to count tokens during streaming.
- */
-export type CountStrategy = "estimate" | "direct";
-
-/**
- * Behavior for TPS after streaming ends.
- */
-export type EndTpsBehavior = "average" | "last";
+import { type CountStrategy } from "../settings/items/count-strategy";
+import { type DisplayMode } from "../settings/items/display";
+import { type EndTpsBehavior } from "../settings/items/end-tps-behavior";
 
 /**
  * TPS tier names, shared by the threshold and color groups.
@@ -19,24 +8,24 @@ export type EndTpsBehavior = "average" | "last";
 export type TierName = "slow" | "medium" | "fast" | "blazing";
 
 /**
+ * TPS tiers as an interface
+ */
+interface Tiers<T> {
+  slow: T;
+  medium: T;
+  fast: T;
+  blazing: T;
+}
+
+/**
  * TPS threshold (tok/s) at or above which a tier applies.
  */
-export interface Thresholds {
-  slow: number;
-  medium: number;
-  fast: number;
-  blazing: number;
-}
+export interface Thresholds extends Tiers<number> {}
 
 /**
  * Hex color (`#RRGGBB`) used for each TPS tier.
  */
-export interface Colors {
-  slow: string;
-  medium: string;
-  fast: string;
-  blazing: string;
-}
+export interface Colors extends Tiers<string> {}
 
 /**
  * Core configuration fields (everything except `providerOverrides`).

@@ -1,0 +1,379 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { STATUS_KEY } from "../src/config/constants";
+import type { TokenSpeedConfig } from "../src/config/types";
+import { TokenSpeedEngine } from "../src/core/engine";
+import { Renderer } from "../src/ui/renderer";
+
+// ---------- mock settings (must be top-level for vitest) ----------
+
+const makeConfig = (
+  partial: Partial<TokenSpeedConfig> = {},
+): TokenSpeedConfig => ({
+  display: "tps",
+  slidingWindow: 5000,
+  useProviderTokens: false,
+  countStrategy: "direct",
+  endTpsBehavior: "average",
+  icon: "⚡",
+  updateInterval: 0,
+  thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
+  colors: {
+    slow: "#ffcc00",
+    medium: "#88cc00",
+    fast: "#44cc44",
+    blazing: "#00ccff",
+  },
+  providerOverrides: {},
+  ...partial,
+});
+
+// Mutable container so the mock closure always reads the latest value
+const configRef: { current: TokenSpeedConfig } = { current: makeConfig() };
+
+vi.mock("../src/config/settings", () => ({
+  settings: {
+    getConfig: () => configRef.current,
+    getEffectiveConfig: () => configRef.current,
+  },
+}));
+
+// ---------- helpers ----------
+
+const makeEngine = (
+  overrides?: Partial<TokenSpeedEngine>,
+): TokenSpeedEngine => {
+  const engine = new TokenSpeedEngine();
+  engine.initialize();
+  engine.start();
+  Object.assign(engine, overrides);
+  return engine;
+};
+
+const makeContext = (
+  overrides?: Partial<ExtensionContext>,
+): ExtensionContext => ({
+  ui: {
+    setStatus: vi.fn(),
+    theme: {
+      fg: (_color: string, text: string) => text,
+      bg: (_color: string, text: string) => text,
+      bold: (text: string) => text,
+      italic: (text: string) => text,
+      underline: (text: string) => text,
+      inverse: (text: string) => text,
+      strikethrough: (text: string) => text,
+      getFgAnsi: (_color: string) => "",
+      getBgAnsi: (_color: string) => "",
+      getColorMode: () => "truecolor" as const,
+      getThinkingBorderColor: () => (s: string) => s,
+      getBashModeBorderColor: () => (s: string) => s,
+    } as any,
+    ...((overrides as any)?.ui ?? {}),
+  },
+  model: undefined as any,
+  mode: "tui" as const,
+  hasUI: true,
+  cwd: "/tmp",
+  sessionManager: {} as any,
+  modelRegistry: {} as any,
+  scopedModels: [],
+  isIdle: () => true,
+  isProjectTrusted: () => true,
+  signal: undefined,
+  abort: () => {},
+  hasPendingMessages: () => false,
+  shutdown: () => {},
+  getContextUsage: () => undefined,
+  compact: () => {},
+  getSystemPrompt: () => "",
+  ...overrides,
+});
+
+// ---------- tests ----------
+
+describe("Renderer", () => {
+  let engine: TokenSpeedEngine;
+  let ctx: ExtensionContext;
+  let renderer: Renderer;
+
+  beforeEach(() => {
+    // Reset to default config (no throttle)
+    configRef.current = makeConfig();
+    engine = makeEngine();
+    ctx = makeContext();
+    renderer = new Renderer(engine);
+  });
+
+  // ---- update / throttle ----
+
+  describe("update", () => {
+    it("calls render when no interval is set (immediate)", () => {
+      const renderSpy = vi.spyOn(renderer as any, "render");
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls render immediately on first call with interval", () => {
+      const renderSpy = vi.spyOn(renderer as any, "render");
+      (renderer as any).lastUpdateTime = 0;
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("throttles subsequent calls within the interval", () => {
+      configRef.current = makeConfig({ updateInterval: 500 });
+      renderer = new Renderer(engine);
+      const renderSpy = vi.spyOn(renderer as any, "render");
+
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+
+      // Call again before interval elapses
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+
+      // Advance time past the interval
+      (renderer as any).lastUpdateTime = Date.now() - 600;
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ---- render (status bar text) ----
+
+  describe("render", () => {
+    it("sets the status bar with the TPS measurement", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      engine["_tps"] = 42.5;
+
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("42.5 tok/s"),
+      );
+    });
+
+    it("uses the configured icon as prefix", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      configRef.current = makeConfig({ icon: "🚀" });
+      renderer = new Renderer(engine);
+      engine["_tps"] = 10;
+
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("🚀"),
+      );
+    });
+
+    it("omits the icon when disabled", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      configRef.current = makeConfig({ icon: "" });
+      renderer = new Renderer(engine);
+      engine["_tps"] = 10;
+
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.not.stringContaining("🚀"),
+      );
+    });
+
+    it("applies color based on thresholds", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+
+      // blazing tier — #00ccff = rgb(0, 204, 255)
+      engine["_tps"] = 150;
+      (renderer as any).render(ctx);
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("\x1b[38;2;0;204;255m"),
+      );
+
+      // fast tier — #44cc44 = rgb(68, 204, 68)
+      engine["_tps"] = 75;
+      (renderer as any).render(ctx);
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("\x1b[38;2;68;204;68m"),
+      );
+
+      // medium tier — #88cc00 = rgb(136, 204, 0)
+      engine["_tps"] = 40;
+      (renderer as any).render(ctx);
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("\x1b[38;2;136;204;0m"),
+      );
+
+      // slow tier — #ffcc00 = rgb(255, 204, 0)
+      engine["_tps"] = 20;
+      (renderer as any).render(ctx);
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.stringContaining("\x1b[38;2;255;204;0m"),
+      );
+
+      // below slow — no color (empty string)
+      engine["_tps"] = 5;
+      (renderer as any).render(ctx);
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        expect.not.stringContaining("\x1b[38;2;"),
+      );
+    });
+
+    it.each([
+      ["tps", "tps"],
+      ["ttft", "ttft"],
+      ["stats", "stats"],
+      ["full", "full"],
+    ])("renders suffix for display mode '%s'", (mode: string) => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      configRef.current = makeConfig({ display: mode as any });
+      renderer = new Renderer(engine);
+      engine["_tps"] = 30;
+
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalled();
+    });
+  });
+
+  // ---- getColor ----
+
+  describe("getColor", () => {
+    it("returns blazing color for high TPS", () => {
+      const config = makeConfig();
+      const color = (renderer as any).getColor(config, 150);
+      expect(color).toBe("#00ccff");
+    });
+
+    it("returns fast color for medium-high TPS", () => {
+      const config = makeConfig();
+      const color = (renderer as any).getColor(config, 75);
+      expect(color).toBe("#44cc44");
+    });
+
+    it("returns medium color for medium TPS", () => {
+      const config = makeConfig();
+      const color = (renderer as any).getColor(config, 40);
+      expect(color).toBe("#88cc00");
+    });
+
+    it("returns slow color for low TPS", () => {
+      const config = makeConfig();
+      const color = (renderer as any).getColor(config, 20);
+      expect(color).toBe("#ffcc00");
+    });
+
+    it("returns empty string for very low TPS", () => {
+      const config = makeConfig();
+      const color = (renderer as any).getColor(config, 5);
+      expect(color).toBe("");
+    });
+
+    it("handles exact boundary values", () => {
+      const config = makeConfig({
+        thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
+      });
+      expect((renderer as any).getColor(config, 10)).toBe("#ffcc00");
+      expect((renderer as any).getColor(config, 30)).toBe("#88cc00");
+      expect((renderer as any).getColor(config, 60)).toBe("#44cc44");
+      expect((renderer as any).getColor(config, 100)).toBe("#00ccff");
+    });
+  });
+
+  // ---- formatStats ----
+
+  describe("formatStats", () => {
+    it("shows tokens only when elapsed is zero", () => {
+      const result = (renderer as any).formatStats(100, 0);
+      expect(result).toBe("100 tok");
+    });
+
+    it("shows tokens and elapsed time", () => {
+      const result = (renderer as any).formatStats(100, 5.3);
+      expect(result).toBe("100 tok in 5.3s");
+    });
+
+    it("rounds elapsed to one decimal place", () => {
+      const result = (renderer as any).formatStats(100, 3.14159);
+      expect(result).toBe("100 tok in 3.1s");
+    });
+  });
+
+  // ---- buildSuffix ----
+
+  describe("buildSuffix", () => {
+    it('returns a zero-width space for "tps" mode', () => {
+      const suffix = (renderer as any).buildSuffix("tps");
+      expect(suffix).toBe("\u200b");
+    });
+
+    it('includes TTFT for "ttft" mode', () => {
+      engine["_ttftEnd"] = 500;
+      engine["_ttftStart"] = 0;
+      const suffix = (renderer as any).buildSuffix("ttft");
+      expect(suffix).toContain("(TTFT: 500 ms)");
+    });
+
+    it('includes stats for "stats" mode', () => {
+      engine["_tokenCount"] = 200;
+      engine["_startTime"] = Date.now() - 5000;
+      engine["_endTime"] = Date.now();
+      const suffix = (renderer as any).buildSuffix("stats");
+      expect(suffix).toContain("200 tok in");
+      expect(suffix).toContain(".0s");
+    });
+
+    it('includes both stats and TTFT for "full" mode', () => {
+      engine["_tokenCount"] = 200;
+      engine["_startTime"] = Date.now() - 5000;
+      engine["_endTime"] = Date.now();
+      engine["_ttftEnd"] = 300;
+      engine["_ttftStart"] = 0;
+      const suffix = (renderer as any).buildSuffix("full");
+      expect(suffix).toContain("200 tok in");
+      expect(suffix).toContain(".0s");
+      expect(suffix).toContain("TTFT: 300 ms");
+    });
+  });
+
+  // ---- initialize ----
+
+  describe("initialize", () => {
+    it("sets the status bar to a placeholder with TPS: --", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+
+      renderer.initialize(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(STATUS_KEY, "⚡ TPS: --");
+    });
+
+    it("omits icon when icon is empty", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      configRef.current = makeConfig({ icon: "" });
+      renderer = new Renderer(engine);
+
+      renderer.initialize(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(STATUS_KEY, "TPS: --");
+    });
+  });
+
+  // ---- resetThrottle ----
+
+  describe("resetThrottle", () => {
+    it("resets lastUpdateTime to 0", () => {
+      (renderer as any).lastUpdateTime = 1000;
+      renderer.resetThrottle();
+      expect((renderer as any).lastUpdateTime).toBe(0);
+    });
+  });
+});

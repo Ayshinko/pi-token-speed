@@ -1,19 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   MAX_SLIDING_WINDOW,
   MIN_SLIDING_WINDOW,
 } from "../src/config/constants";
 import { settings } from "../src/config/settings";
-import { Validator } from "../src/config/validation";
+import type { TokenSpeedConfig } from "../src/config/types";
+import { OverrideValidator } from "../src/settings/items/override-validator";
+
+import { isValidHex } from "../src/settings/items/tiers/validation";
 
 const defaults = settings.getDefaultConfig();
 
-describe("Validator.isValidHex", () => {
+const createValidator = (provider: string, base: TokenSpeedConfig = defaults) =>
+  new OverrideValidator(provider, base);
+
+describe("isValidHex", () => {
   it.each(["#00ff88", "#FFFFFF", "#000000", "#a1B2c3"])(
     "accepts valid hex %s",
     (hex) => {
-      expect(Validator.isValidHex(hex)).toBe(true);
+      expect(isValidHex(hex)).toBe(true);
     },
   );
 
@@ -25,25 +31,25 @@ describe("Validator.isValidHex", () => {
     "#fff", // 3-digit shorthand not supported
     "",
   ])("rejects invalid hex %s", (hex) => {
-    expect(Validator.isValidHex(hex)).toBe(false);
+    expect(isValidHex(hex)).toBe(false);
   });
 });
 
-describe("Validator.validate", () => {
+describe("validateConfig", () => {
   it("accepts the default config without errors", () => {
-    const { config, errors } = Validator.validate(defaults);
+    const { config, errors } = settings.validateConfig(defaults);
     expect(errors).toEqual([]);
     expect(config).toEqual(defaults);
   });
 
   it("does not mutate the input config", () => {
     const input = { ...defaults, display: "bogus" as never };
-    Validator.validate(input);
+    settings.validateConfig(input);
     expect(input.display).toBe("bogus");
   });
 
   it("corrects an invalid display mode to the default", () => {
-    const { config, errors } = Validator.validate({
+    const { config, errors } = settings.validateConfig({
       ...defaults,
       display: "bogus" as never,
     });
@@ -54,7 +60,7 @@ describe("Validator.validate", () => {
   });
 
   it("corrects an invalid countStrategy to the default", () => {
-    const { config, errors } = Validator.validate({
+    const { config, errors } = settings.validateConfig({
       ...defaults,
       countStrategy: "wizard" as never,
     });
@@ -65,7 +71,7 @@ describe("Validator.validate", () => {
   });
 
   it("corrects an invalid endTpsBehavior to the default", () => {
-    const { config, errors } = Validator.validate({
+    const { config, errors } = settings.validateConfig({
       ...defaults,
       endTpsBehavior: "sometimes" as never,
     });
@@ -78,7 +84,7 @@ describe("Validator.validate", () => {
   it.each([undefined, "true", 1, null])(
     "corrects non-boolean useProviderTokens (%s)",
     (value) => {
-      const { config, errors } = Validator.validate({
+      const { config, errors } = settings.validateConfig({
         ...defaults,
         useProviderTokens: value as never,
       });
@@ -90,10 +96,9 @@ describe("Validator.validate", () => {
   it.each([
     50, // below minimum
     MAX_SLIDING_WINDOW + 1, // above maximum
-    "1000",
     null,
   ])("corrects out-of-range slidingWindow (%s)", (value) => {
-    const { config, errors } = Validator.validate({
+    const { config, errors } = settings.validateConfig({
       ...defaults,
       slidingWindow: value as never,
     });
@@ -102,11 +107,11 @@ describe("Validator.validate", () => {
   });
 
   it("accepts slidingWindow at the min/max boundaries", () => {
-    const { errors: lo } = Validator.validate({
+    const { errors: lo } = settings.validateConfig({
       ...defaults,
       slidingWindow: MIN_SLIDING_WINDOW,
     });
-    const { errors: hi } = Validator.validate({
+    const { errors: hi } = settings.validateConfig({
       ...defaults,
       slidingWindow: MAX_SLIDING_WINDOW,
     });
@@ -115,7 +120,7 @@ describe("Validator.validate", () => {
   });
 
   it("flags non-ascending thresholds without correcting them", () => {
-    const { config, errors } = Validator.validate({
+    const { config, errors } = settings.validateConfig({
       ...defaults,
       thresholds: { ...defaults.thresholds, fast: 1 },
     });
@@ -131,15 +136,19 @@ describe("Validator.validate", () => {
   });
 
   it("flags invalid colors", () => {
-    const { errors } = Validator.validate({
+    const { errors } = settings.validateConfig({
       ...defaults,
       colors: { ...defaults.colors, fast: "not-a-color" },
     });
-    expect(errors.some((e) => e.includes("Invalid colors.fast"))).toBe(true);
+    expect(
+      errors.some(
+        (e) => e.includes("Invalid hex color") && e.includes("not-a-color"),
+      ),
+    ).toBe(true);
   });
 
   it("accepts a valid non-default config", () => {
-    const { errors } = Validator.validate({
+    const { errors } = settings.validateConfig({
       ...defaults,
       display: "stats",
       countStrategy: "estimate",
@@ -152,97 +161,82 @@ describe("Validator.validate", () => {
   });
 });
 
-describe("Validator.validateOverride", () => {
+describe("validateOverride", () => {
+  let validator: OverrideValidator;
+
+  beforeEach(() => {
+    validator = createValidator("anthropic");
+  });
+
   it("passes a valid block through unchanged", () => {
     const override = {
       display: "stats" as const,
       slidingWindow: 2000,
     };
-    const { config, errors } = Validator.validateOverride(
-      "anthropic",
-      override,
-      defaults,
-    );
+    const { config, errors } = validator.validate(override);
     expect(errors).toEqual([]);
     expect(config).toEqual(override);
   });
 
   it("drops invalid enum values and reports them", () => {
-    const { config, errors } = Validator.validateOverride(
-      "anthropic",
-      { display: "bogus" as never },
-      defaults,
-    );
+    const { config, errors } = validator.validate({
+      display: "bogus" as never,
+    });
     expect(config.display).toBeUndefined();
     expect(errors[0]).toContain('providerOverrides["anthropic"]');
     expect(errors[0]).toContain('Invalid display "bogus"');
   });
 
   it("drops non-boolean useProviderTokens", () => {
-    const { config, errors } = Validator.validateOverride(
-      "openai",
-      { useProviderTokens: "yes" as never },
-      defaults,
-    );
+    const { config, errors } = createValidator("openai").validate({
+      useProviderTokens: "yes" as never,
+    });
     expect(config.useProviderTokens).toBeUndefined();
     expect(errors[0]).toContain("useProviderTokens");
   });
 
   it("drops out-of-range slidingWindow", () => {
-    const { config } = Validator.validateOverride(
-      "openai",
-      { slidingWindow: 1 },
-      defaults,
-    );
+    const { config } = createValidator("openai").validate({
+      slidingWindow: 1,
+    });
     expect(config.slidingWindow).toBeUndefined();
   });
 
   it("drops non-string icons", () => {
-    const { config, errors } = Validator.validateOverride(
-      "openai",
-      { icon: 42 as never },
-      defaults,
-    );
+    const { config, errors } = createValidator("openai").validate({
+      icon: 42 as never,
+    });
     expect(config.icon).toBeUndefined();
     expect(errors[0]).toContain("icon");
   });
 
   it("keeps only numeric threshold tiers and validates the merged order", () => {
     // Merged with base, the partial below produces valid ascending order
-    const good = Validator.validateOverride(
-      "anthropic",
-      { thresholds: { slow: 5, medium: 10 } },
-      defaults,
-    );
+    const good = validator.validate({
+      thresholds: { slow: 5, medium: 10 },
+    });
     expect(good.errors).toEqual([]);
     expect(good.config.thresholds).toEqual({ slow: 5, medium: 10 });
 
     // A partial that breaks the merged order is dropped entirely
-    const bad = Validator.validateOverride(
-      "anthropic",
-      { thresholds: { medium: 999 } },
-      { ...defaults, thresholds: { ...defaults.thresholds, fast: 50 } },
-    );
+    const bad = createValidator("anthropic", {
+      ...defaults,
+      thresholds: { ...defaults.thresholds, fast: 50 },
+    }).validate({ thresholds: { medium: 999 } });
     expect(bad.config.thresholds).toBeUndefined();
     expect(bad.errors[0]).toContain("Thresholds must be in ascending order");
   });
 
   it("drops non-numeric threshold tiers with a warning", () => {
-    const { config, errors } = Validator.validateOverride(
-      "anthropic",
-      { thresholds: { slow: "high" as never } },
-      defaults,
-    );
+    const { config, errors } = validator.validate({
+      thresholds: { slow: "high" as never },
+    });
     expect(config.thresholds).toBeUndefined();
     expect(errors[0]).toContain("Invalid thresholds.slow");
   });
 
   it("keeps only valid hex color tiers and validates the merged set", () => {
-    const good = Validator.validateOverride(
-      "anthropic",
-      { colors: { fast: "#ABCDEF" } },
-      defaults,
-    );
+    const good = validator.validate({ colors: { fast: "#ABCDEF" } });
     expect(good.errors).toEqual([]);
     // Valid hex is lowercased
     expect(good.config.colors).toEqual({ fast: "#abcdef" });
@@ -254,24 +248,19 @@ describe("Validator.validateOverride", () => {
       ...defaults,
       colors: { ...defaults.colors, fast: "nope" },
     };
-    const bad = Validator.validateOverride(
+    const bad = createValidator(
       "anthropic",
-      { colors: { slow: "#00ff88" } },
       staleBase as typeof defaults,
-    );
+    ).validate({ colors: { slow: "#00ff88" } });
     expect(bad.config.colors).toBeUndefined();
     expect(bad.errors[0]).toContain("Effective colors must be valid hex");
   });
 
   it("drops non-object thresholds and colors groups", () => {
-    const { config, errors } = Validator.validateOverride(
-      "anthropic",
-      {
-        thresholds: "nope" as never,
-        colors: ["#00ff88"] as never,
-      },
-      defaults,
-    );
+    const { config, errors } = validator.validate({
+      thresholds: "nope" as never,
+      colors: ["#00ff88"] as never,
+    });
     expect(config.thresholds).toBeUndefined();
     expect(config.colors).toBeUndefined();
     expect(errors.some((e) => e.includes("Invalid thresholds"))).toBe(true);
@@ -279,7 +268,7 @@ describe("Validator.validateOverride", () => {
   });
 
   it("omits keys not present in the override", () => {
-    const { config } = Validator.validateOverride("anthropic", {}, defaults);
+    const { config } = validator.validate({});
     expect(config).toEqual({});
   });
 });

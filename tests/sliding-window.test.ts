@@ -1,23 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { MIN_SLIDING_WINDOW } from "../src/config/constants";
 import { SlidingWindow } from "../src/core/sliding-window";
 
 describe("SlidingWindow", () => {
+  let w: SlidingWindow;
+
+  beforeEach(() => {
+    w = new SlidingWindow(1000);
+  });
+
   it("returns 0 when empty", () => {
-    const w = new SlidingWindow(1000);
     expect(w.getTps(5000)).toBe(0);
   });
 
   it("returns 0 when all events are older than the window", () => {
-    const w = new SlidingWindow(1000);
     w.record(10); // recorded at "now" (Date.now() inside record)
     // Far-future query pushes the event out of the window
     expect(w.getTps(Date.now() + 10_000)).toBe(0);
   });
 
   it("calculates tps over the window span", () => {
-    const w = new SlidingWindow(1000);
     const base = 10_000;
     // Inject events directly via record + controlled timestamps is not
     // possible (record uses Date.now()), so test via getTps arithmetic:
@@ -29,7 +32,6 @@ describe("SlidingWindow", () => {
   });
 
   it("only counts tokens inside the window", () => {
-    const w = new SlidingWindow(1000);
     const t0 = 10_000; // arbitrary base timestamp
     w.record(100);
     w.record(50);
@@ -42,7 +44,6 @@ describe("SlidingWindow", () => {
   });
 
   it("excludes tokens recorded before the window from the count", () => {
-    const w = new SlidingWindow(1000);
     const t0 = 10_000;
     w.record(100);
     w.record(50);
@@ -56,7 +57,6 @@ describe("SlidingWindow", () => {
   });
 
   it("uses MIN_SLIDING_WINDOW as floor for very short spans", () => {
-    const w = new SlidingWindow(1000);
     w.record(1000);
     // Query at (nearly) the same instant: span would be ~0
     const now = w["events"][0].time;
@@ -65,13 +65,12 @@ describe("SlidingWindow", () => {
   });
 
   it("returns 0 when window contains only zero-token events", () => {
-    const w = new SlidingWindow(1000);
     w.record(0);
     expect(w.getTps(Date.now() + 10)).toBe(0);
   });
 
   it("extends span backwards for same-timestamp bursts after older events", () => {
-    const w = new SlidingWindow(10_000);
+    w = new SlidingWindow(10_000);
     const t0 = Date.now();
     // First event well before the burst
     w.record(10);
@@ -90,7 +89,7 @@ describe("SlidingWindow", () => {
   });
 
   it("does not extend span when the burst is the only event", () => {
-    const w = new SlidingWindow(10_000);
+    w = new SlidingWindow(10_000);
     w.record(100);
     const now = w["events"][0].time;
     // windowStartIndex is 0, so no previous event to extend to
@@ -98,7 +97,6 @@ describe("SlidingWindow", () => {
   });
 
   it("reset clears all events", () => {
-    const w = new SlidingWindow(1000);
     w.record(100);
     w.record(100);
     w.reset();
@@ -108,7 +106,6 @@ describe("SlidingWindow", () => {
   });
 
   it("compacts old events once the dead prefix reaches the threshold", () => {
-    const w = new SlidingWindow(1000);
     // Exceed COMPACTION_THRESHOLD (5000) stale events
     for (let i = 0; i < 5001; i++) w.record(1);
     const staleTime = Date.now() - 60_000;

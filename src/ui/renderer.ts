@@ -1,8 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DisplayMode, type TokenSpeedConfig } from "../config/config-types";
 import { STATUS_KEY } from "../config/constants";
 import { settings } from "../config/settings";
+import type { TokenSpeedConfig } from "../config/types";
 import { TokenSpeedEngine } from "../core/engine";
+import { type DisplayMode } from "../settings/items/display";
 import { truecolor } from "./ansi";
 
 /**
@@ -94,6 +95,18 @@ export class Renderer {
     return `${tokenCount} tok in ${elapsedSeconds.toFixed(1)}s`;
   }
 
+  private readonly RENDER_SUFFIXES: Record<
+    DisplayMode,
+    (ttft: number, tokens: number, elapsed: number) => string
+  > = {
+    tps: () => "\u200b",
+    ttft: (ttft) => ` (TTFT: ${ttft} ms)\u200b`,
+    stats: (_, tokens, elapsed) =>
+      ` (${this.formatStats(tokens, elapsed)})\u200b`,
+    full: (ttft, tokens, elapsed) =>
+      ` (${this.formatStats(tokens, elapsed)} · TTFT: ${ttft} ms)\u200b`,
+  };
+
   /**
    * Builds a suffix for the status bar after the TPS measurement.
    *
@@ -102,17 +115,7 @@ export class Renderer {
    */
   private buildSuffix(display: DisplayMode): string {
     const { ttft, tokenCount: tokens, elapsedSeconds: elapsed } = this.engine;
-
-    switch (display) {
-      case "tps":
-        return `\u200b`;
-      case "ttft":
-        return ` (TTFT: ${ttft} ms)\u200b`;
-      case "stats":
-        return ` (${this.formatStats(tokens, elapsed)})\u200b`;
-      case "full":
-        return ` (${this.formatStats(tokens, elapsed)} · TTFT: ${ttft} ms)\u200b`;
-    }
+    return this.RENDER_SUFFIXES[display](ttft, tokens, elapsed);
   }
 
   /**
