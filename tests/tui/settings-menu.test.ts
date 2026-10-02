@@ -3,9 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { SettingItem, TUI } from "@earendil-works/pi-tui";
 import { settings } from "../../src/config/settings";
-import type { TokenSpeedEngine } from "../../src/core/engine";
-import { SettingsMenu } from "../../src/settings/menu";
-import type { Renderer } from "../../src/ui/renderer";
+import { SettingsMenu } from "../../src/settings/menu/settings-menu";
 
 // ── Mock settings ──────────────────────────────────────────────────────────
 
@@ -76,39 +74,17 @@ function makeTui(): TUI {
   } as unknown as TUI;
 }
 
-function makeEngine(): TokenSpeedEngine {
-  return {
-    initialize: vi.fn(),
-    applyProvider: vi.fn(),
-  } as unknown as TokenSpeedEngine;
-}
-
-function makeRenderer(): Renderer {
-  return {
-    update: vi.fn(),
-  } as unknown as Renderer;
-}
-
-function makeCtx() {
-  return {
-    ui: { notify: vi.fn() },
-    mode: "tui",
-    model: { provider: "test" },
-  };
-}
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("SettingsMenu", () => {
   let menu: SettingsMenu;
-  let engine: TokenSpeedEngine;
-  let renderer: Renderer;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    engine = makeEngine();
-    renderer = makeRenderer();
-    menu = new SettingsMenu(renderer, engine);
+    menu = new SettingsMenu({
+      config: settings.getConfig(),
+      onSettingChange: vi.fn(),
+    });
   });
 
   // ── buildSettingsItems ───────────────────────────────────────────────
@@ -118,7 +94,6 @@ describe("SettingsMenu", () => {
       const tui = makeTui();
       const items = (menu as any).buildSettingsItems(
         settings.getConfig(),
-        makeCtx(),
         makeTheme(),
         tui,
       );
@@ -137,7 +112,6 @@ describe("SettingsMenu", () => {
       const tui = makeTui();
       const items = (menu as any).buildSettingsItems(
         settings.getConfig(),
-        makeCtx(),
         makeTheme(),
         tui,
       );
@@ -157,7 +131,6 @@ describe("SettingsMenu", () => {
       const tui = makeTui();
       const items = (menu as any).buildSettingsItems(
         settings.getConfig(),
-        makeCtx(),
         makeTheme(),
         tui,
       );
@@ -168,35 +141,51 @@ describe("SettingsMenu", () => {
     });
   });
 
-  // ── createSettingsList ───────────────────────────────────────────────
+  // ── createMainSettingsList ───────────────────────────────────────────
 
-  describe("createSettingsList", () => {
+  describe("createMainSettingsList", () => {
     it("creates a list with correct items", () => {
       const tui = makeTui();
-      const onClose = vi.fn();
-      const ctx = makeCtx();
+      const onChange = vi.fn();
+      const onCancel = vi.fn();
+      const onReset = vi.fn();
       const items = [
         { id: "test", label: "Test", currentValue: "value" },
       ] as SettingItem[];
 
-      const list = (menu as any).createSettingsList(items, onClose, ctx, tui);
+      const list = (menu as any).createMainSettingsList(
+        items,
+        items.length,
+        onChange,
+        onCancel,
+        onReset,
+        tui,
+      );
 
       expect(list).toBeDefined();
       expect((list as any).items).toEqual(items);
     });
 
-    it("calls onClose when the list is closed", () => {
+    it("calls onCancel when the list is closed", () => {
       const tui = makeTui();
-      const onClose = vi.fn();
-      const ctx = makeCtx();
+      const onChange = vi.fn();
+      const onCancel = vi.fn();
+      const onReset = vi.fn();
       const items = [
         { id: "test", label: "Test", currentValue: "value" },
       ] as SettingItem[];
 
-      const list = (menu as any).createSettingsList(items, onClose, ctx, tui);
+      const list = (menu as any).createMainSettingsList(
+        items,
+        items.length,
+        onChange,
+        onCancel,
+        onReset,
+        tui,
+      );
 
       (list as any).onCancel();
-      expect(onClose).toHaveBeenCalled();
+      expect(onCancel).toHaveBeenCalled();
     });
   });
 
@@ -205,11 +194,17 @@ describe("SettingsMenu", () => {
   describe("createSubmenuList", () => {
     it("stores items for threshold submenus", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [{ id: "thresholds.slow", label: "Slow" }] as SettingItem[];
 
-      const list = (menu as any).createSubmenuList(items, ctx, tui, done);
+      const list = (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       expect((menu as any).thresholdSubmenuItems).toEqual(items);
       expect((menu as any).activeSubmenuList).toBe(list);
@@ -217,11 +212,17 @@ describe("SettingsMenu", () => {
 
     it("stores items for color submenus", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [{ id: "colors.slow", label: "Slow" }] as SettingItem[];
 
-      const list = (menu as any).createSubmenuList(items, ctx, tui, done);
+      const list = (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       expect((menu as any).colorSubmenuItems).toEqual(items);
       expect((menu as any).activeSubmenuList).toBe(list);
@@ -229,11 +230,17 @@ describe("SettingsMenu", () => {
 
     it("clears stored items when submenu closes", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [{ id: "thresholds.slow", label: "Slow" }] as SettingItem[];
 
-      const list = (menu as any).createSubmenuList(items, ctx, tui, done);
+      const list = (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       // Close the submenu
       (list as any).onCancel();
@@ -247,25 +254,32 @@ describe("SettingsMenu", () => {
   // ── handleSettingChange ──────────────────────────────────────────────
 
   describe("handleSettingChange", () => {
-    it("calls engine.initialize and renderer.update on success", async () => {
-      const ctx = makeCtx();
+    it("calls onSettingChange on success", async () => {
+      const onSettingChange = vi.fn();
+      const menu2 = new SettingsMenu({
+        config: settings.getConfig(),
+        onSettingChange,
+      });
+
       (settings.setConfig as any).mockResolvedValue(undefined);
 
-      await (menu as any).handleSettingChange("display", "TPS speed", ctx);
+      await (menu2 as any).handleSettingChange("display", "TPS speed");
 
-      expect(engine.initialize).toHaveBeenCalled();
-      expect(renderer.update).toHaveBeenCalledWith(ctx);
+      expect(onSettingChange).toHaveBeenCalled();
     });
 
-    it("shows a warning when validation fails", async () => {
-      const ctx = makeCtx();
+    it("does nothing when validation fails", async () => {
+      const onSettingChange = vi.fn();
+      const menu2 = new SettingsMenu({
+        config: settings.getConfig(),
+        onSettingChange,
+      });
+
       (settings.setConfig as any).mockResolvedValue(undefined);
 
-      await (menu as any).handleSettingChange("display", "invalid-value", ctx);
+      await (menu2 as any).handleSettingChange("display", "invalid-value");
 
-      expect(
-        (ctx as { ui: { notify: ReturnType<typeof vi.fn> } }).ui.notify,
-      ).toHaveBeenCalled();
+      expect(onSettingChange).not.toHaveBeenCalled();
     });
   });
 
@@ -281,10 +295,12 @@ describe("SettingsMenu", () => {
           currentValue: "10 | 30 | 60 | 100",
         },
       ] as SettingItem[];
-      const list = (menu as any).createSettingsList(
+      const list = (menu as any).createMainSettingsList(
         items,
+        items.length,
         () => {},
-        makeCtx(),
+        () => {},
+        () => {},
         tui,
       );
 
@@ -298,14 +314,20 @@ describe("SettingsMenu", () => {
 
     it("updates threshold submenu items", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [
         { id: "thresholds.slow", label: "Slow", currentValue: "10" },
         { id: "thresholds.medium", label: "Medium", currentValue: "30" },
       ] as SettingItem[];
 
-      (menu as any).createSubmenuList(items, ctx, tui, done);
+      (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       // Mutate the internal items
       (menu as any).refreshThresholdItems();
@@ -315,11 +337,17 @@ describe("SettingsMenu", () => {
 
     it("invalidates the active submenu list", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [{ id: "thresholds.slow", label: "Slow" }] as SettingItem[];
 
-      const list = (menu as any).createSubmenuList(items, ctx, tui, done);
+      const list = (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       (menu as any).refreshThresholdItems();
 
@@ -335,10 +363,12 @@ describe("SettingsMenu", () => {
       const items = [
         { id: "colors", label: "Colors", currentValue: "■ ■ ■ ■" },
       ] as SettingItem[];
-      const list = (menu as any).createSettingsList(
+      const list = (menu as any).createMainSettingsList(
         items,
+        items.length,
         () => {},
-        makeCtx(),
+        () => {},
+        () => {},
         tui,
       );
 
@@ -352,13 +382,19 @@ describe("SettingsMenu", () => {
 
     it("updates color submenu items", () => {
       const tui = makeTui();
-      const ctx = makeCtx();
       const done = vi.fn();
       const items = [
         { id: "colors.slow", label: "■ Slow", currentValue: "#ffcc00" },
       ] as SettingItem[];
 
-      (menu as any).createSubmenuList(items, ctx, tui, done);
+      (menu as any).createSubmenuList(
+        items,
+        Math.min(items.length + 2, 15),
+        () => {},
+        done,
+        () => {},
+        tui,
+      );
 
       (menu as any).refreshColorItems();
 

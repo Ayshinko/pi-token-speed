@@ -1,15 +1,28 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { SettingItem, TUI } from "@earendil-works/pi-tui";
 import { settings } from "../config/settings";
+import type {
+  ProviderOverride,
+  TierName,
+  TokenSpeedConfig,
+} from "../config/types";
 import { isValidHex } from "../settings/items/tiers/validation";
 import { TIERS } from "../settings/options";
 import { truecolor } from "./ansi";
 import { HexColorInput } from "./color-input";
 import { InputDialog } from "./dialog/input-dialog";
+import { BASE } from "./editor/utils";
+
+/** A TIERS entry (tier key + display label). */
+type TierInfo = (typeof TIERS)[number];
 
 /**
  * Builds SettingsList items for tier submenus (colors and thresholds).
  * Each tier opens a framed `InputDialog` for editing on Enter.
+ *
+ * Values are resolved through protected hooks so subclasses (e.g.
+ * `OverrideTierSubmenuBuilder`) can redirect reads to an override block
+ * without duplicating the item construction.
  */
 export class TierSubmenuBuilder {
   private readonly placeholder: string = "■";
@@ -25,27 +38,28 @@ export class TierSubmenuBuilder {
    * @returns Array of SettingItem for the color submenu.
    */
   buildColors(): SettingItem[] {
-    const config = settings.getConfig();
-
-    return TIERS.map((tier) => ({
-      id: `colors.${tier.key}`,
-      label: `${truecolor(this.placeholder, config.colors[tier.key])} ${tier.label}`,
-      description: `Hex color for the ${tier.label.toLowerCase()} tier`,
-      currentValue: config.colors[tier.key],
-      // Read the config value fresh each time the submenu opens
-      // so that previously saved colors are reflected immediately
-      submenu: InputDialog.inputSubmenu(this.theme, this.tui, {
-        title: `${tier.label} color`,
-        message: `Hex color for the ${tier.label.toLowerCase()} tier`,
-        placeholder: "#RRGGBB",
-        initialValue: config.colors[tier.key],
-        // Live hex preview while typing (see PLAN_COLORS.md).
-        createInput: () => new HexColorInput(),
-        // Normalize on commit: hex is stored lower-cased regardless of
-        // how the user typed it (isValidHex accepts both cases).
-        validate: (raw) => (isValidHex(raw) ? raw.toLowerCase() : null),
-      }),
-    }));
+    return TIERS.map((tier) => {
+      const hex = this.resolveColor(tier.key);
+      return {
+        id: `colors.${tier.key}`,
+        label: `${truecolor(this.placeholder, hex)} ${tier.label}`,
+        description: this.colorDescription(tier, hex),
+        currentValue: this.colorCurrentValue(tier, hex),
+        // Read the value fresh each time the submenu opens so that
+        // previously saved colors are reflected immediately
+        submenu: InputDialog.inputSubmenu(this.theme, this.tui, {
+          title: `${tier.label} color`,
+          message: this.colorMessage(tier, hex),
+          placeholder: "#RRGGBB",
+          initialValue: this.colorInitialValue(tier, hex),
+          // Live hex preview while typing (see PLAN_COLORS.md).
+          createInput: () => new HexColorInput(),
+          // Normalize on commit: hex is stored lower-cased regardless
+          // of how the user typed it (isValidHex accepts both cases).
+          validate: (raw) => this.validateColor(raw),
+        }),
+      };
+    });
   }
 
   /**
@@ -54,27 +68,246 @@ export class TierSubmenuBuilder {
    * @returns Array of SettingItem for the threshold submenu.
    */
   buildThresholds(): SettingItem[] {
-    const config = settings.getConfig();
+    return TIERS.map((tier) => {
+      const value = this.resolveThreshold(tier.key);
+      return {
+        id: `thresholds.${tier.key}`,
+        label: tier.label,
+        description: this.thresholdDescription(tier, value),
+        currentValue: this.thresholdCurrentValue(tier, value),
+        // Read the value fresh each time the submenu opens so that
+        // previously saved thresholds are reflected immediately
+        submenu: InputDialog.inputSubmenu(this.theme, this.tui, {
+          title: `${tier.label} threshold`,
+          message: this.thresholdMessage(tier, value),
+          placeholder: "non-negative integer",
+          initialValue: this.thresholdInitialValue(tier, value),
+          validate: (raw) => this.validateThreshold(raw),
+        }),
+      };
+    });
+  }
 
-    return TIERS.map((tier) => ({
-      id: `thresholds.${tier.key}`,
-      label: tier.label,
-      description: `TPS threshold for the ${tier.label.toLowerCase()} tier`,
-      currentValue: config.thresholds[tier.key].toString(),
-      // Read the config value fresh each time the submenu opens
-      // so that previously saved thresholds are reflected immediately
-      submenu: InputDialog.inputSubmenu(this.theme, this.tui, {
-        title: `${tier.label} threshold`,
-        message: `TPS threshold for the ${tier.label.toLowerCase()} tier`,
-        placeholder: "non-negative integer",
-        initialValue: config.thresholds[tier.key].toString(),
-        validate: (raw) => {
-          const num = Number(raw);
-          return Number.isFinite(num) && num >= 0 && Number.isInteger(num)
-            ? num.toString()
-            : null;
-        },
-      }),
-    }));
+  // ── Value resolvers ───────────────────────────────────────────────────
+
+  /**
+   * Resolves the configured TPS threshold for a tier.
+   *
+   * @param tier The tier key.
+   * @returns The threshold value.
+   */
+  protected resolveThreshold(tier: TierName): number {
+    return settings.getConfig().thresholds[tier];
+  }
+
+  /**
+   * Resolves the configured hex color for a tier.
+   *
+   * @param tier The tier key.
+   * @returns The hex color string.
+   */
+  protected resolveColor(tier: TierName): string {
+    return settings.getConfig().colors[tier];
+  }
+
+  // ── Threshold formatting hooks ────────────────────────────────────────
+
+  /**
+   * Description for a threshold row.
+   *
+   * @param tier The tier entry.
+   * @param value The resolved threshold value.
+   * @returns The description text.
+   */
+  protected thresholdDescription(tier: TierInfo, value: number): string {
+    return `TPS threshold for the ${tier.label.toLowerCase()} tier`;
+  }
+
+  /**
+   * Displayed current value for a threshold row.
+   *
+   * @param tier The tier entry.
+   * @param value The resolved threshold value.
+   * @returns The display string.
+   */
+  protected thresholdCurrentValue(tier: TierInfo, value: number): string {
+    return value.toString();
+  }
+
+  /**
+   * Initial input value when the threshold dialog opens.
+   *
+   * @param tier The tier entry.
+   * @param value The resolved threshold value.
+   * @returns The initial input string.
+   */
+  protected thresholdInitialValue(tier: TierInfo, value: number): string {
+    return value.toString();
+  }
+
+  /**
+   * Message shown inside the threshold input dialog.
+   *
+   * @param tier The tier entry.
+   * @param value The resolved threshold value.
+   * @returns The message text.
+   */
+  protected thresholdMessage(tier: TierInfo, value: number): string {
+    return `TPS threshold for the ${tier.label.toLowerCase()} tier`;
+  }
+
+  /**
+   * Validates a raw threshold input.
+   *
+   * @param raw The raw input string.
+   * @returns The normalized value, or null when invalid.
+   */
+  protected validateThreshold(raw: string): string | null {
+    const num = Number(raw);
+    return Number.isFinite(num) && num >= 0 && Number.isInteger(num)
+      ? num.toString()
+      : null;
+  }
+
+  // ── Color formatting hooks ────────────────────────────────────────────
+
+  /**
+   * Description for a color row.
+   *
+   * @param tier The tier entry.
+   * @param hex The resolved hex color.
+   * @returns The description text.
+   */
+  protected colorDescription(tier: TierInfo, hex: string): string {
+    return `Hex color for the ${tier.label.toLowerCase()} tier`;
+  }
+
+  /**
+   * Displayed current value for a color row.
+   *
+   * @param tier The tier entry.
+   * @param hex The resolved hex color.
+   * @returns The display string.
+   */
+  protected colorCurrentValue(tier: TierInfo, hex: string): string {
+    return hex;
+  }
+
+  /**
+   * Initial input value when the color dialog opens.
+   *
+   * @param tier The tier entry.
+   * @param hex The resolved hex color.
+   * @returns The initial input string.
+   */
+  protected colorInitialValue(tier: TierInfo, hex: string): string {
+    return hex;
+  }
+
+  /**
+   * Message shown inside the color input dialog.
+   *
+   * @param tier The tier entry.
+   * @param hex The resolved hex color.
+   * @returns The message text.
+   */
+  protected colorMessage(tier: TierInfo, hex: string): string {
+    return `Hex color for the ${tier.label.toLowerCase()} tier`;
+  }
+
+  /**
+   * Validates a raw color input.
+   *
+   * @param raw The raw input string.
+   * @returns The normalized value, or null when invalid.
+   */
+  protected validateColor(raw: string): string | null {
+    return isValidHex(raw) ? raw.toLowerCase() : null;
+  }
+}
+
+/**
+ * Builds tier submenu items for a provider override block: values come
+ * from the block when set, falling back to the base config otherwise.
+ *
+ * Non-overridden fields display the `(base)` marker, submit an empty
+ * value (interpreted by `computeNextBlock` as "remove key → use base"),
+ * and mention the base value in their descriptions and dialog messages.
+ */
+export class OverrideTierSubmenuBuilder extends TierSubmenuBuilder {
+  constructor(
+    theme: Theme,
+    tui: TUI,
+    private readonly base: TokenSpeedConfig,
+    private readonly getBlock: () => ProviderOverride,
+  ) {
+    super(theme, tui);
+  }
+
+  /** Reads from the override block, falling back to the base config. */
+  protected override resolveThreshold(tier: TierName): number {
+    return this.getBlock().thresholds?.[tier] ?? this.base.thresholds[tier];
+  }
+
+  /** Reads from the override block, falling back to the base config. */
+  protected override resolveColor(tier: TierName): string {
+    return this.getBlock().colors?.[tier] ?? this.base.colors[tier];
+  }
+
+  protected override thresholdDescription(
+    tier: TierInfo,
+    _value: number,
+  ): string {
+    return `TPS threshold override for the ${tier.label.toLowerCase()} tier (Base: ${this.base.thresholds[tier.key]})`;
+  }
+
+  /** `(base)` marker when the tier is not overridden. */
+  protected override thresholdCurrentValue(
+    tier: TierInfo,
+    _value: number,
+  ): string {
+    return this.getBlock().thresholds?.[tier.key]?.toString() ?? BASE;
+  }
+
+  /** Empty initial value when the tier is not overridden. */
+  protected override thresholdInitialValue(
+    tier: TierInfo,
+    _value: number,
+  ): string {
+    return this.getBlock().thresholds?.[tier.key]?.toString() ?? "";
+  }
+
+  protected override thresholdMessage(tier: TierInfo, _value: number): string {
+    return `TPS threshold for the ${tier.label.toLowerCase()} tier (empty = reset to base: ${this.base.thresholds[tier.key]})`;
+  }
+
+  /** Accepts an empty input as "reset to base". */
+  protected override validateThreshold(raw: string): string | null {
+    if (raw.trim() === "") return "";
+    return super.validateThreshold(raw);
+  }
+
+  protected override colorDescription(tier: TierInfo, _hex: string): string {
+    return `Hex color override for the ${tier.label.toLowerCase()} tier (Base: ${this.base.colors[tier.key]})`;
+  }
+
+  /** `(base)` marker when the tier is not overridden. */
+  protected override colorCurrentValue(tier: TierInfo, _hex: string): string {
+    return this.getBlock().colors?.[tier.key] ?? BASE;
+  }
+
+  /** Empty initial value when the tier is not overridden. */
+  protected override colorInitialValue(tier: TierInfo, _hex: string): string {
+    return this.getBlock().colors?.[tier.key] ?? "";
+  }
+
+  protected override colorMessage(tier: TierInfo, _hex: string): string {
+    return `Hex color for the ${tier.label.toLowerCase()} tier (empty = reset to base: ${this.base.colors[tier.key]})`;
+  }
+
+  /** Accepts an empty input as "reset to base". */
+  protected override validateColor(raw: string): string | null {
+    if (raw.trim() === "") return "";
+    return super.validateColor(raw);
   }
 }

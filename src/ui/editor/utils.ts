@@ -13,37 +13,6 @@ import { truecolor } from "../ansi";
 export const BASE = "(base)";
 
 /**
- * Formats a block as the summary shown in the provider rows.
- * Only explicitly-set keys appear; `—` when the block is empty.
- */
-export function formatOverrideSummary(block: ProviderOverride): string {
-  const base = settings.getConfig();
-  const parts: string[] = [];
-  for (const item of Object.values(SETTINGS_ITEMS)) {
-    if (item.id.startsWith("thresholds") || item.id.startsWith("colors"))
-      continue;
-    if (item.id in block) {
-      parts.push(`${item.id}: ${item.formatPartial(block, base) ?? ""}`);
-    }
-  }
-  if (block.thresholds !== undefined) {
-    const set = TIERS.filter((t) => block.thresholds![t.key] !== undefined);
-    if (set.length > 0) {
-      parts.push(
-        `thresholds: ${set.map((t) => `${t.key}=${block.thresholds![t.key]}`).join(" ")}`,
-      );
-    }
-  }
-  if (block.colors !== undefined) {
-    const tiers = TIERS.filter((t) => block.colors![t.key] !== undefined);
-    if (tiers.length > 0) {
-      parts.push(`colors: ${tiers.map((t) => block.colors![t.key]).join(" ")}`);
-    }
-  }
-  return parts.length > 0 ? parts.join(", ") : "—";
-}
-
-/**
  * Computes the currentValue shown for a block field row.
  */
 export function fieldValue(id: string, block: ProviderOverride): string {

@@ -1,0 +1,384 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type {
+  KeybindingsManager,
+  SettingItem,
+  SettingsList,
+  TUI,
+} from "@earendil-works/pi-tui";
+import { settings } from "../../config/settings";
+import type { ProviderOverride, ProviderOverrides } from "../../config/types";
+import { truecolor } from "../../ui/ansi";
+import { OverrideTierSubmenuBuilder } from "../../ui/color-picker";
+import { BASE, computeNextBlock, fieldValue } from "../../ui/editor/utils";
+import { ResettableSettingsList } from "../../ui/resettable-settings-list";
+import { SETTINGS_ITEMS } from "../defaults";
+import { TIERS } from "../options";
+import { AbstractSettingsMenu } from "./abstract-settings-menu";
+
+/**
+ * Options for the per-provider override menu.
+ */
+export interface ProviderOverrideMenuOptions {
+  /** The provider whose overrides are being edited. */
+  providerId: string;
+  /** The shared overrides map (mutated in place on commit). */
+  overrides: ProviderOverrides;
+  /** Persists the full overrides map. */
+  persist: (next: ProviderOverrides) => Promise<void>;
+  /** Sink for validation warnings (e.g. `ctx.ui.notify`). */
+  onWarning: (message: string) => void;
+  /** Optional callback after a committed change (e.g. summary refresh). */
+  onBlockChanged?: () => void;
+}
+
+/**
+ * Per-provider override menu — relative values with base fallback.
+ *
+ * Mirrors `SettingsMenu` item building, but reads values from the
+ * provider's override block (falling back to the base config) and
+ * commits by removing/setting keys in the block. Non-overridden fields
+ * display the `(base)` marker.
+ */
+export class ProviderOverrideMenu extends AbstractSettingsMenu {
+  private settingsList: ResettableSettingsList | null = null;
+  private theme: Theme | null = null;
+  private tui: TUI | null = null;
+
+  constructor(private readonly opts: ProviderOverrideMenuOptions) {
+    super();
+  }
+
+  /**
+   * Creates the override settings list UI for this provider.
+   *
+   * @param tui The TUI instance.
+   * @param theme The active theme.
+   * @param _keybindings Unused (no keybindings needed).
+   * @param done Callback when the menu is closed.
+   * @returns A SettingsList to display.
+   */
+  create(
+    tui: TUI,
+    theme: Theme,
+    _keybindings: KeybindingsManager,
+    done: (value?: string) => void,
+  ): SettingsList {
+    this.theme = theme;
+    this.tui = tui;
+    const block = this.block();
+    const items = this.buildItems(block, theme, tui);
+    this.settingsList = this.createMainSettingsList(
+      items,
+      Math.min(items.length + 2, 15),
+      (id, value) => void this.handleSettingChange(id, value),
+      () => done(undefined),
+      (id) => void this.resetSetting(id),
+      tui,
+    );
+    return this.settingsList;
+  }
+
+  /**
+   * Returns the current override block for this provider.
+   */
+  private block(): ProviderOverride {
+    return this.opts.overrides[this.opts.providerId] ?? {};
+  }
+
+  // ── Commit / reset hooks ──────────────────────────────────────────────
+
+  /**
+   * Computes the next override block and persists it.
+   *
+   * @param id The setting identifier.
+   * @param value The new value (`""`/`BASE` removes the key → base).
+   * @returns Whether the change was committed.
+   */
+  protected override async commit(id: string, value: string): Promise<boolean> {
+    const nextBlock = computeNextBlock(
+      this.block(),
+      id,
+      value,
+      this.opts.onWarning,
+    );
+    if (nextBlock === null) return false;
+    return this.persistBlock(nextBlock);
+  }
+
+  /**
+   * Resets a single field by removing it from the override block so it
+   * falls back to the base config value.
+   *
+   * @param id The setting identifier.
+   */
+  protected override async resetScalar(id: string): Promise<void> {
+    const value =
+      id.startsWith("thresholds.") || id.startsWith("colors.") ? "" : BASE;
+    await this.commit(id, value);
+  }
+
+  /**
+   * Resets a grouped setting by removing the entire group key from the
+   * override block.
+   *
+   * @param id The group identifier ("thresholds" or "colors").
+   */
+  protected override async resetGroup(id: string): Promise<void> {
+    const current = this.block();
+    if (current[id as keyof ProviderOverride] === undefined) return;
+    const nextBlock = { ...current };
+    delete nextBlock[id as keyof ProviderOverride];
+    await this.persistBlock(nextBlock);
+  }
+
+  /**
+   * Persists the given block for this provider and syncs the shared
+   * overrides map in place so all holders see fresh data.
+   *
+   * @param nextBlock The next override block.
+   * @returns Whether the persistence succeeded.
+   */
+  private async persistBlock(nextBlock: ProviderOverride): Promise<boolean> {
+    const next: ProviderOverrides = {
+      ...this.opts.overrides,
+      [this.opts.providerId]: nextBlock,
+    };
+    try {
+      await this.opts.persist(next);
+    } catch {
+      return false;
+    }
+    this.syncOverrides(next);
+    return true;
+  }
+
+  /**
+   * Replaces the shared overrides map's contents in place.
+   *
+   * @param next The next overrides map.
+   */
+  private syncOverrides(next: ProviderOverrides): void {
+    for (const key of Object.keys(this.opts.overrides)) {
+      delete this.opts.overrides[key];
+    }
+    Object.assign(this.opts.overrides, next);
+  }
+
+  // ── Post-change refresh ───────────────────────────────────────────────
+
+  /**
+   * Refreshes all rows and notifies the block-changed callback.
+   *
+   * @param id The setting identifier that changed.
+   */
+  protected override afterChange(id: string): void {
+    this.refreshScalarRows();
+    this.opts.onBlockChanged?.();
+    super.afterChange(id);
+  }
+
+  /**
+   * Refreshes all rows and notifies the block-changed callback.
+   *
+   * @param id The setting identifier that was reset.
+   */
+  protected override afterReset(id: string): void {
+    this.refreshScalarRows();
+    this.opts.onBlockChanged?.();
+    super.afterReset(id);
+  }
+
+  /**
+   * Updates scalar row values from the current override block.
+   */
+  private refreshScalarRows(): void {
+    const block = this.block();
+    if (!this.settingsList) return;
+    for (const item of Object.values(SETTINGS_ITEMS)) {
+      if (item.id.startsWith("thresholds") || item.id.startsWith("colors")) {
+        continue;
+      }
+      this.settingsList.updateValue(item.id, fieldValue(item.id, block));
+    }
+  }
+
+  /**
+   * Refreshes threshold rows: the group row, the stored submenu items,
+   * and the active submenu list (if open).
+   */
+  protected override refreshThresholdItems(): void {
+    const block = this.block();
+    this.settingsList?.updateValue(
+      "thresholds",
+      fieldValue("thresholds", block),
+    );
+
+    if (this.thresholdSubmenuItems) {
+      for (const { key } of TIERS) {
+        const item = this.thresholdSubmenuItems.find(
+          (i) => i.id === `thresholds.${key}`,
+        );
+        if (item) {
+          item.currentValue = block.thresholds?.[key]?.toString() ?? BASE;
+        }
+      }
+    }
+
+    if (this.activeSubmenuList) {
+      for (const { key } of TIERS) {
+        this.activeSubmenuList.updateValue(
+          `thresholds.${key}`,
+          block.thresholds?.[key]?.toString() ?? BASE,
+        );
+      }
+      this.activeSubmenuList.invalidate();
+    }
+  }
+
+  /**
+   * Refreshes color rows: the group row, the stored submenu items
+   * (labels included), and the active submenu list (if open).
+   */
+  protected override refreshColorItems(): void {
+    const block = this.block();
+    const base = settings.getConfig();
+    this.settingsList?.updateValue("colors", fieldValue("colors", block));
+
+    if (!this.thresholdSubmenuItems && this.colorSubmenuItems) {
+      for (const { key, label } of TIERS) {
+        const item = this.colorSubmenuItems.find(
+          (i) => i.id === `colors.${key}`,
+        );
+        if (item) {
+          const hex = block.colors?.[key] ?? base.colors[key];
+          item.label = `${truecolor("■", hex)} ${label}`;
+          item.currentValue = block.colors?.[key] ?? BASE;
+        }
+      }
+    }
+
+    if (this.activeSubmenuList) {
+      for (const { key, label } of TIERS) {
+        const hex = block.colors?.[key] ?? base.colors[key];
+        this.activeSubmenuList.updateValue(
+          `colors.${key}`,
+          block.colors?.[key] ?? BASE,
+        );
+        // The active list holds the same item references as the stored
+        // submenu items, so mutating labels here updates the rendering.
+        const items = this.colorSubmenuItems ?? [];
+        const item = items.find((i) => i.id === `colors.${key}`);
+        if (item) {
+          item.label = `${truecolor("■", hex)} ${label}`;
+        }
+      }
+      this.activeSubmenuList.invalidate();
+    }
+  }
+
+  // ── Item building ─────────────────────────────────────────────────────
+
+  /**
+   * Builds the full list of SettingItems for this provider's overrides.
+   *
+   * @param block The current override block.
+   * @param theme The active theme.
+   * @param tui The TUI instance.
+   * @returns An array of SettingItems.
+   */
+  private buildItems(
+    block: ProviderOverride,
+    theme: Theme,
+    tui: TUI,
+  ): SettingItem[] {
+    const base = settings.getConfig();
+    const items: SettingItem[] = [];
+
+    // Scalar settings (excludes grouped thresholds/colors)
+    for (const item of Object.values(SETTINGS_ITEMS)) {
+      if (item.id.startsWith("thresholds") || item.id.startsWith("colors")) {
+        continue;
+      }
+      const hasField = item.id in block;
+      items.push({
+        id: item.id,
+        label: item.label,
+        description: `Base: ${item.formatPartial({}, base)}`,
+        currentValue: hasField
+          ? (item.formatPartial(block, base) ?? BASE)
+          : BASE,
+        values: [BASE, ...(item.values ?? [])],
+      });
+    }
+
+    // Group items — Thresholds and Colors
+    const thresholdsItem = SETTINGS_ITEMS["thresholds"];
+    if (thresholdsItem) {
+      items.push({
+        id: "thresholds",
+        label: thresholdsItem.label,
+        description:
+          "Customize TPS threshold overrides (slow, medium, fast, blazing)",
+        currentValue: fieldValue("thresholds", block),
+        submenu: (
+          _currentValue: string,
+          submenuDone: (value?: string) => void,
+        ) =>
+          this.openTierSubmenu(
+            new OverrideTierSubmenuBuilder(theme, tui, base, () =>
+              this.block(),
+            ).buildThresholds(),
+            submenuDone,
+            tui,
+          ),
+      });
+    }
+
+    const colorsItem = SETTINGS_ITEMS["colors"];
+    if (colorsItem) {
+      items.push({
+        id: "colors",
+        label: colorsItem.label,
+        description:
+          "Customize tier color overrides (slow, medium, fast, blazing)",
+        currentValue: fieldValue("colors", block),
+        submenu: (
+          _currentValue: string,
+          submenuDone: (value?: string) => void,
+        ) =>
+          this.openTierSubmenu(
+            new OverrideTierSubmenuBuilder(theme, tui, base, () =>
+              this.block(),
+            ).buildColors(),
+            submenuDone,
+            tui,
+          ),
+      });
+    }
+
+    return items;
+  }
+
+  /**
+   * Wraps tier submenu items in a resettable submenu list.
+   *
+   * @param submenuItems The tier items to display.
+   * @param submenuDone Callback when the submenu is closed.
+   * @param tui The TUI instance.
+   * @returns A SettingsList for the submenu.
+   */
+  private openTierSubmenu(
+    submenuItems: SettingItem[],
+    submenuDone: (value?: string) => void,
+    tui: TUI,
+  ): SettingsList {
+    return this.createSubmenuList(
+      submenuItems,
+      Math.min(submenuItems.length + 2, 15),
+      (id, value) => void this.handleSettingChange(id, value),
+      () => submenuDone(undefined),
+      (id) => void this.resetSetting(id),
+      tui,
+    );
+  }
+}

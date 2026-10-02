@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { KeybindingsManager, TUI } from "@earendil-works/pi-tui";
-import { OverridesEditor } from "../../src/ui/editor/overrides-editor";
+import type { ProviderOverrides } from "../../src/config/types";
+import { OverrideSettingsMenu } from "../../src/settings/menu/override-settings-menu";
 
 function makeTheme(): Theme {
   return {
@@ -23,12 +24,7 @@ function makeTui(): TUI {
 
 function makeKeybindings(): KeybindingsManager {
   return {
-    matches: vi.fn((_data: string, id: string) => {
-      if (id === "tui.select.cancel") return _data === "\x1b";
-      if (id === "tui.select.up") return _data === "up";
-      if (id === "tui.select.down") return _data === "down";
-      return false;
-    }),
+    matches: vi.fn(() => false),
     getKeys: vi.fn(() => []),
     getDefinition: vi.fn(),
     getConflicts: vi.fn(() => []),
@@ -77,110 +73,119 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   };
 });
 
-// ── Minimal mocks ──────────────────────────────────────────────────────────
+// ── Harness ──────────────────────────────────────────────────────────────────
 
-function makeOptions(overrides: Record<string, unknown> = {}) {
-  const persistFn = vi.fn(async (next: Record<string, unknown>) => {
+function makeHarness(initial: ProviderOverrides = {}) {
+  const overrides: ProviderOverrides = { ...initial };
+  const persist = vi.fn(async (next: ProviderOverrides) => {
+    Object.keys(overrides).forEach((k) => delete overrides[k]);
     Object.assign(overrides, next);
   });
-  return {
-    theme: makeTheme(),
-    tui: makeTui(),
-    keybindings: makeKeybindings(),
-    overrides: { ...overrides },
-    persist: persistFn,
-    done: vi.fn(),
+  const menu = new OverrideSettingsMenu({
+    overrides,
+    persist,
+    onSettingChange: vi.fn(),
     onError: vi.fn(),
-    onWarning: vi.fn(),
-  };
+  });
+  const tui = makeTui();
+  const theme = makeTheme();
+  const done = vi.fn();
+  const list = menu.create(tui, theme, makeKeybindings(), done);
+  return { menu, list, overrides, persist, tui, done };
 }
+
+/** Flushes the microtask chain of persistNext(). */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe("OverridesEditor", () => {
-  let editor: OverridesEditor;
-
+describe("OverrideSettingsMenu add/remove hooks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    editor = new OverridesEditor(makeOptions() as any);
   });
 
-  it("starts in list mode with no dialogs", () => {
-    // @ts-expect-error — private fields; mode/dialogs are implementation
-    // details but the bug was exactly about them not being set, so we
-    // inspect them directly to catch regressions early.
-    expect(editor.mode).toBe("list");
-    // @ts-expect-error — private fields; mode/dialogs are implementation
-    // details but the bug was exactly about them not being set, so we
-    // inspect them directly to catch regressions early.
-    expect(editor.mode).toBe("list");
+  it("starts with no dialogs open", () => {
+    const { menu, list } = makeHarness();
+    list.handleInput("x"); // unrelated key: must not open anything
+
+    // @ts-expect-error — private fields; implementation details inspected
+    // directly to catch regressions of the dead-key bug early.
+    expect(menu.addDialog).toBeUndefined();
     // @ts-expect-error
-    expect(editor.addDialog).toBeUndefined();
-    // @ts-expect-error
-    expect(editor.confirmDialog).toBeUndefined();
+    expect(menu.confirmDialog).toBeUndefined();
   });
 
-  it("pressing 'a' transitions to add mode and creates the dialog", () => {
-    editor.handleInput("a");
+  it("pressing 'a' opens the add-provider dialog", () => {
+    const { menu, list } = makeHarness();
+    list.handleInput("a");
 
     // @ts-expect-error
-    expect(editor.mode).toBe("add");
-    // @ts-expect-error
-    expect(editor.addDialog).toBeDefined();
+    expect(menu.addDialog).toBeDefined();
   });
 
-  it("pressing 'd' transitions to confirm mode and creates the dialog", () => {
-    editor = new OverridesEditor(makeOptions({ test: {} }) as any);
-    editor.handleInput("d");
+  it("pressing 'd' opens the delete confirmation for the selected provider", () => {
+    const { menu, list } = makeHarness({ test: {} });
+    list.handleInput("d");
 
     // @ts-expect-error
-    expect(editor.mode).toBe("confirm");
-    // @ts-expect-error
-    expect(editor.confirmDialog).toBeDefined();
+    expect(menu.confirmDialog).toBeDefined();
   });
 
-  it("cancel on add dialog returns to list mode", () => {
-    editor.handleInput("a");
+  it("cancel on add dialog closes it", () => {
+    const { menu, list } = makeHarness();
+    list.handleInput("a");
 
     // @ts-expect-error
-    expect(editor.mode).toBe("add");
-    // @ts-expect-error
-    const dialog = editor.addDialog!;
+    const dialog = menu.addDialog!;
     dialog.handleInput("\x1b"); // Esc
 
     // @ts-expect-error
-    expect(editor.mode).toBe("list");
-    // @ts-expect-error
-    expect(editor.addDialog).toBeUndefined();
+    expect(menu.addDialog).toBeUndefined();
   });
 
-  it("cancel on confirm dialog returns to list mode", () => {
-    editor = new OverridesEditor(makeOptions({ test: {} }) as any);
-    editor.handleInput("d");
+  it("cancel on confirm dialog closes it", () => {
+    const { menu, list } = makeHarness({ test: {} });
+    list.handleInput("d");
 
     // @ts-expect-error
-    expect(editor.mode).toBe("confirm");
-    // @ts-expect-error
-    const dialog = editor.confirmDialog!;
+    const dialog = menu.confirmDialog!;
     dialog.handleInput("\x1b"); // Esc
 
     // @ts-expect-error
-    expect(editor.mode).toBe("list");
-    // @ts-expect-error
-    expect(editor.confirmDialog).toBeUndefined();
+    expect(menu.confirmDialog).toBeUndefined();
   });
 
-  it("submitting add dialog returns to list mode", () => {
-    editor.handleInput("a");
+  it("submitting the add dialog persists the new provider", async () => {
+    const { menu, list, overrides, persist } = makeHarness();
+    list.handleInput("a");
 
     // @ts-expect-error
-    const dialog = editor.addDialog!;
-    dialog.handleInput("anthropic"); // type the value
+    const dialog = menu.addDialog!;
+    dialog.handleInput("anthropic"); // type the provider id
     dialog.handleInput("\r"); // Enter to submit
+    await flush();
+
+    expect(persist).toHaveBeenCalled();
+    expect(overrides["anthropic"]).toEqual({});
+    // @ts-expect-error
+    expect(menu.addDialog).toBeUndefined();
+  });
+
+  it("confirming delete persists the removal", async () => {
+    const { menu, list, overrides, persist } = makeHarness({
+      test: { icon: "⚡" },
+    });
+    list.handleInput("d");
 
     // @ts-expect-error
-    expect(editor.mode).toBe("list");
+    const dialog = menu.confirmDialog!;
+    // confirm is the first row of the dialog's SelectList
+    dialog.handleInput("\r");
+    await flush();
+
+    expect(persist).toHaveBeenCalled();
+    expect(overrides["test"]).toBeUndefined();
     // @ts-expect-error
-    expect(editor.addDialog).toBeUndefined();
+    expect(menu.confirmDialog).toBeUndefined();
   });
 });

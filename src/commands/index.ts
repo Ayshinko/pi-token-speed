@@ -1,19 +1,20 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { settings } from "../config/settings";
 import type { TokenSpeedEngine } from "../core/engine";
-import { SettingsMenu } from "../settings/menu";
+import { OverrideSettingsMenu } from "../settings/menu/override-settings-menu";
+import { SettingsMenu } from "../settings/menu/settings-menu";
 import type { Renderer } from "../ui/renderer";
 
 /**
  * Thin command router — dispatches `/tps` arguments to the appropriate handler.
- * All UI/ctx concerns are delegated to `SettingsMenu`.
+ * All UI/ctx concerns are owned here; menu classes are pure UI components.
  */
 export class CommandManager {
-  private readonly settingsMenu: SettingsMenu;
-
-  constructor(renderer: Renderer, engine: TokenSpeedEngine) {
-    this.settingsMenu = new SettingsMenu(renderer, engine);
-  }
+  constructor(
+    private readonly renderer: Renderer,
+    private readonly engine: TokenSpeedEngine,
+  ) {}
 
   /**
    * Argument completions for the `/tps` command.
@@ -41,12 +42,34 @@ export class CommandManager {
    */
   async runTps(args: string, ctx: ExtensionCommandContext): Promise<void> {
     if (args === "overrides") {
-      await this.settingsMenu.showOverridesEditor(ctx);
+      const overrides = settings.getConfig().providerOverrides;
+      const menu = new OverrideSettingsMenu({
+        overrides: { ...overrides },
+        persist: (next) => settings.setProviderOverrides(next),
+        onSettingChange: () => {
+          this.engine.initialize();
+          this.engine.applyProvider(ctx.model?.provider);
+          this.renderer.update(ctx);
+        },
+        onError: (message) => ctx.ui.notify(message, "error"),
+      });
+      await ctx.ui.custom<void>((tui, theme, kb, done) =>
+        menu.create(tui, theme, kb, () => done(undefined)),
+      );
       return;
     }
 
     if (args === "") {
-      await this.settingsMenu.showSettingsMenu(ctx);
+      const menu = new SettingsMenu({
+        config: settings.getConfig(),
+        onSettingChange: () => {
+          this.engine.initialize();
+          this.renderer.update(ctx);
+        },
+      });
+      await ctx.ui.custom<void>((tui, theme, kb, done) =>
+        menu.create(tui, theme, kb, () => done(undefined)),
+      );
       return;
     }
 
