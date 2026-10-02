@@ -34,7 +34,7 @@ export interface OverrideSettingsMenuOptions {
  * supports adding (`a`) and removing (`d`) providers via the list hooks.
  */
 export class OverrideSettingsMenu extends AbstractSettingsMenu {
-  private settingsList: ResettableSettingsList | null = null;
+  override settingsList: ResettableSettingsList | null = null;
   private submenuOpen = false;
   private tui: TUI | null = null;
   private theme: Theme | null = null;

@@ -19,9 +19,11 @@ import {
  */
 export abstract class AbstractSettingsMenu {
   /** Currently active submenu SettingsList (colors or thresholds). */
-  protected activeSubmenuList: SettingsList | null = null;
-  protected colorSubmenuItems: SettingItem[] | null = null;
-  protected thresholdSubmenuItems: SettingItem[] | null = null;
+  activeSubmenuList: SettingsList | null = null;
+  colorSubmenuItems: SettingItem[] | null = null;
+  thresholdSubmenuItems: SettingItem[] | null = null;
+  /** The main settings list (set after `create()` is called). */
+  settingsList: SettingsList | null = null;
 
   /**
    * Creates a resettable SettingsList for the main settings menu.

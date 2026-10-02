@@ -6,12 +6,13 @@ import type {
   TUI,
 } from "@earendil-works/pi-tui";
 import { settings } from "../../config/settings";
-import type { TokenSpeedConfig } from "../../config/types";
+import type { Colors, Thresholds, TokenSpeedConfig } from "../../config/types";
 import { truecolor } from "../../ui/ansi";
 import { TierSubmenuBuilder } from "../../ui/color-picker";
 import { SETTINGS_ITEMS, TIER_SETTINGS_ITEMS } from "../defaults";
 import { TIERS } from "../options";
 import { AbstractSettingsMenu } from "./abstract-settings-menu";
+import { SettingsListRefresher } from "./settings-list-refresher";
 
 /**
  * Options for the base settings menu.
@@ -28,10 +29,19 @@ export interface SettingsMenuOptions {
  * Accepts an `onSettingChange` callback to trigger re-apply after changes.
  */
 export class SettingsMenu extends AbstractSettingsMenu {
-  private settingsList: SettingsList | null = null;
+  private refresher: SettingsListRefresher;
 
   constructor(private readonly opts: SettingsMenuOptions) {
     super();
+    this.refresher = new SettingsListRefresher(this, this);
+  }
+
+  getThresholds(): Thresholds {
+    return this.opts.config.thresholds;
+  }
+
+  getColors(): Colors {
+    return this.opts.config.colors;
   }
 
   /**
@@ -221,33 +231,15 @@ export class SettingsMenu extends AbstractSettingsMenu {
    */
   override refreshThresholdItems(): void {
     const config = settings.getConfig();
-    const { thresholds } = config;
-    const allThresholds = TIERS.map(({ key }) => thresholds[key]).join(" | ");
+    const allThresholds = TIERS.map(({ key }) => config.thresholds[key]).join(
+      " | ",
+    );
 
     if (this.settingsList) {
       this.settingsList.updateValue("thresholds", allThresholds);
     }
 
-    if (this.thresholdSubmenuItems) {
-      for (const { key } of TIERS) {
-        const item = this.thresholdSubmenuItems.find(
-          (i) => i.id === `thresholds.${key}`,
-        );
-        if (item) {
-          item.currentValue = thresholds[key].toString();
-        }
-      }
-    }
-
-    if (this.activeSubmenuList) {
-      for (const { key } of TIERS) {
-        this.activeSubmenuList.updateValue(
-          `thresholds.${key}`,
-          thresholds[key].toString(),
-        );
-      }
-      this.activeSubmenuList.invalidate();
-    }
+    this.refresher.refreshThresholds();
   }
 
   /**
@@ -256,45 +248,14 @@ export class SettingsMenu extends AbstractSettingsMenu {
    */
   override refreshColorItems(): void {
     const config = settings.getConfig();
-    const { colors } = config;
 
-    // Update the group row
     if (this.settingsList) {
       this.settingsList.updateValue(
         "colors",
-        TIERS.map(({ key }) => truecolor("■", colors[key])).join(" "),
+        TIERS.map(({ key }) => truecolor("■", config.colors[key])).join(" "),
       );
     }
 
-    // Update color submenu items (skip if threshold submenu is open)
-    if (!this.thresholdSubmenuItems && this.colorSubmenuItems) {
-      for (const { key, label } of TIERS) {
-        const item = this.colorSubmenuItems.find(
-          (i) => i.id === `colors.${key}`,
-        );
-        if (item) {
-          item.label = `${truecolor("■", colors[key])} ${label}`;
-        }
-      }
-    }
-
-    // Update active submenu
-    if (this.activeSubmenuList) {
-      for (const { key, label } of TIERS) {
-        this.activeSubmenuList.updateValue(`colors.${key}`, colors[key]);
-        const internalItems = (
-          this.activeSubmenuList as unknown as { items: SettingItem[] }
-        ).items;
-        if (internalItems) {
-          const item = internalItems.find(
-            (i: SettingItem) => i.id === `colors.${key}`,
-          );
-          if (item) {
-            item.label = `${truecolor("■", colors[key])} ${label}`;
-          }
-        }
-      }
-      this.activeSubmenuList.invalidate();
-    }
+    this.refresher.refreshColors();
   }
 }

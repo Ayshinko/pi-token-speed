@@ -6,14 +6,19 @@ import type {
   TUI,
 } from "@earendil-works/pi-tui";
 import { settings } from "../../config/settings";
-import type { ProviderOverride, ProviderOverrides } from "../../config/types";
+import type {
+  Colors,
+  ProviderOverride,
+  ProviderOverrides,
+  Thresholds,
+} from "../../config/types";
 import { truecolor } from "../../ui/ansi";
 import { OverrideTierSubmenuBuilder } from "../../ui/color-picker";
 import { BASE, computeNextBlock, fieldValue } from "../../ui/editor/utils";
-import { ResettableSettingsList } from "../../ui/resettable-settings-list";
 import { SETTINGS_ITEMS } from "../defaults";
 import { TIERS } from "../options";
 import { AbstractSettingsMenu } from "./abstract-settings-menu";
+import { SettingsListRefresher } from "./settings-list-refresher";
 
 /**
  * Options for the per-provider override menu.
@@ -40,12 +45,40 @@ export interface ProviderOverrideMenuOptions {
  * display the `(base)` marker.
  */
 export class ProviderOverrideMenu extends AbstractSettingsMenu {
-  private settingsList: ResettableSettingsList | null = null;
-  private theme: Theme | null = null;
-  private tui: TUI | null = null;
+  private refresher: SettingsListRefresher;
 
   constructor(private readonly opts: ProviderOverrideMenuOptions) {
     super();
+    this.refresher = new SettingsListRefresher(this, this);
+  }
+
+  /**
+   * Returns the current override block for this provider.
+   */
+  private block(): ProviderOverride {
+    return this.opts.overrides[this.opts.providerId] ?? {};
+  }
+
+  getThresholds(): Thresholds {
+    const block = this.block();
+    const base = settings.getConfig();
+    return {
+      slow: block.thresholds?.slow ?? base.thresholds.slow,
+      medium: block.thresholds?.medium ?? base.thresholds.medium,
+      fast: block.thresholds?.fast ?? base.thresholds.fast,
+      blazing: block.thresholds?.blazing ?? base.thresholds.blazing,
+    };
+  }
+
+  getColors(): Colors {
+    const block = this.block();
+    const base = settings.getConfig();
+    return {
+      slow: block.colors?.slow ?? base.colors.slow,
+      medium: block.colors?.medium ?? base.colors.medium,
+      fast: block.colors?.fast ?? base.colors.fast,
+      blazing: block.colors?.blazing ?? base.colors.blazing,
+    };
   }
 
   /**
@@ -63,8 +96,6 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
     _keybindings: KeybindingsManager,
     done: (value?: string) => void,
   ): SettingsList {
-    this.theme = theme;
-    this.tui = tui;
     const block = this.block();
     const items = this.buildItems(block, theme, tui);
     this.settingsList = this.createMainSettingsList(
@@ -76,13 +107,6 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
       tui,
     );
     return this.settingsList;
-  }
-
-  /**
-   * Returns the current override block for this provider.
-   */
-  private block(): ProviderOverride {
-    return this.opts.overrides[this.opts.providerId] ?? {};
   }
 
   // ── Commit / reset hooks ──────────────────────────────────────────────
@@ -206,44 +230,26 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
    * Refreshes threshold rows: the group row, the stored submenu items,
    * and the active submenu list (if open).
    */
-  protected override refreshThresholdItems(): void {
+  override refreshThresholdItems(): void {
     const block = this.block();
     this.settingsList?.updateValue(
       "thresholds",
       fieldValue("thresholds", block),
     );
 
-    if (this.thresholdSubmenuItems) {
-      for (const { key } of TIERS) {
-        const item = this.thresholdSubmenuItems.find(
-          (i) => i.id === `thresholds.${key}`,
-        );
-        if (item) {
-          item.currentValue = block.thresholds?.[key]?.toString() ?? BASE;
-        }
-      }
-    }
-
-    if (this.activeSubmenuList) {
-      for (const { key } of TIERS) {
-        this.activeSubmenuList.updateValue(
-          `thresholds.${key}`,
-          block.thresholds?.[key]?.toString() ?? BASE,
-        );
-      }
-      this.activeSubmenuList.invalidate();
-    }
+    this.refresher.refreshThresholds();
   }
 
   /**
    * Refreshes color rows: the group row, the stored submenu items
    * (labels included), and the active submenu list (if open).
    */
-  protected override refreshColorItems(): void {
+  override refreshColorItems(): void {
     const block = this.block();
     const base = settings.getConfig();
     this.settingsList?.updateValue("colors", fieldValue("colors", block));
 
+    // Update color submenu items (skip if threshold submenu is open)
     if (!this.thresholdSubmenuItems && this.colorSubmenuItems) {
       for (const { key, label } of TIERS) {
         const item = this.colorSubmenuItems.find(
@@ -257,23 +263,7 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
       }
     }
 
-    if (this.activeSubmenuList) {
-      for (const { key, label } of TIERS) {
-        const hex = block.colors?.[key] ?? base.colors[key];
-        this.activeSubmenuList.updateValue(
-          `colors.${key}`,
-          block.colors?.[key] ?? BASE,
-        );
-        // The active list holds the same item references as the stored
-        // submenu items, so mutating labels here updates the rendering.
-        const items = this.colorSubmenuItems ?? [];
-        const item = items.find((i) => i.id === `colors.${key}`);
-        if (item) {
-          item.label = `${truecolor("■", hex)} ${label}`;
-        }
-      }
-      this.activeSubmenuList.invalidate();
-    }
+    this.refresher.refreshColors();
   }
 
   // ── Item building ─────────────────────────────────────────────────────

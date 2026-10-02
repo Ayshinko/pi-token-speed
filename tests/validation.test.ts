@@ -37,19 +37,19 @@ describe("isValidHex", () => {
 
 describe("validateConfig", () => {
   it("accepts the default config without errors", () => {
-    const { config, errors } = settings.validateConfig(defaults);
+    const { config, errors } = settings.validator.validateConfig(defaults);
     expect(errors).toEqual([]);
     expect(config).toEqual(defaults);
   });
 
   it("does not mutate the input config", () => {
     const input = { ...defaults, display: "bogus" as never };
-    settings.validateConfig(input);
+    settings.validator.validateConfig(input);
     expect(input.display).toBe("bogus");
   });
 
   it("corrects an invalid display mode to the default", () => {
-    const { config, errors } = settings.validateConfig({
+    const { config, errors } = settings.validator.validateConfig({
       ...defaults,
       display: "bogus" as never,
     });
@@ -60,7 +60,7 @@ describe("validateConfig", () => {
   });
 
   it("corrects an invalid countStrategy to the default", () => {
-    const { config, errors } = settings.validateConfig({
+    const { config, errors } = settings.validator.validateConfig({
       ...defaults,
       countStrategy: "wizard" as never,
     });
@@ -71,7 +71,7 @@ describe("validateConfig", () => {
   });
 
   it("corrects an invalid endTpsBehavior to the default", () => {
-    const { config, errors } = settings.validateConfig({
+    const { config, errors } = settings.validator.validateConfig({
       ...defaults,
       endTpsBehavior: "sometimes" as never,
     });
@@ -84,7 +84,7 @@ describe("validateConfig", () => {
   it.each([undefined, "true", 1, null])(
     "corrects non-boolean useProviderTokens (%s)",
     (value) => {
-      const { config, errors } = settings.validateConfig({
+      const { config, errors } = settings.validator.validateConfig({
         ...defaults,
         useProviderTokens: value as never,
       });
@@ -98,7 +98,7 @@ describe("validateConfig", () => {
     MAX_SLIDING_WINDOW + 1, // above maximum
     null,
   ])("corrects out-of-range slidingWindow (%s)", (value) => {
-    const { config, errors } = settings.validateConfig({
+    const { config, errors } = settings.validator.validateConfig({
       ...defaults,
       slidingWindow: value as never,
     });
@@ -107,11 +107,11 @@ describe("validateConfig", () => {
   });
 
   it("accepts slidingWindow at the min/max boundaries", () => {
-    const { errors: lo } = settings.validateConfig({
+    const { errors: lo } = settings.validator.validateConfig({
       ...defaults,
       slidingWindow: MIN_SLIDING_WINDOW,
     });
-    const { errors: hi } = settings.validateConfig({
+    const { errors: hi } = settings.validator.validateConfig({
       ...defaults,
       slidingWindow: MAX_SLIDING_WINDOW,
     });
@@ -120,7 +120,7 @@ describe("validateConfig", () => {
   });
 
   it("flags non-ascending thresholds without correcting them", () => {
-    const { config, errors } = settings.validateConfig({
+    const { config, errors } = settings.validator.validateConfig({
       ...defaults,
       thresholds: { ...defaults.thresholds, fast: 1 },
     });
@@ -136,7 +136,7 @@ describe("validateConfig", () => {
   });
 
   it("flags invalid colors", () => {
-    const { errors } = settings.validateConfig({
+    const { errors } = settings.validator.validateConfig({
       ...defaults,
       colors: { ...defaults.colors, fast: "not-a-color" },
     });
@@ -148,7 +148,7 @@ describe("validateConfig", () => {
   });
 
   it("accepts a valid non-default config", () => {
-    const { errors } = settings.validateConfig({
+    const { errors } = settings.validator.validateConfig({
       ...defaults,
       display: "stats",
       countStrategy: "estimate",
