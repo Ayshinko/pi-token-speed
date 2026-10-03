@@ -21,7 +21,6 @@ describe("SlidingWindow", () => {
   });
 
   it("calculates tps over the window span", () => {
-    const base = 10_000;
     // Inject events directly via record + controlled timestamps is not
     // possible (record uses Date.now()), so test via getTps arithmetic:
     // record N tokens, then compute expected tps from the same timestamps.

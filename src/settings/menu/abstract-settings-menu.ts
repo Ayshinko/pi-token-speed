@@ -177,7 +177,6 @@ export abstract class AbstractSettingsMenu {
    * @param id The setting identifier.
    */
   protected async resetSetting(id: string): Promise<void> {
-    const isSubmenu = this.submenuKeys.some((k) => id.startsWith(k.prefix));
     const isGroup = this.submenuKeys.some((k) => id === k.prefix.slice(0, -1));
     if (isGroup) {
       await this.resetGroup(id);

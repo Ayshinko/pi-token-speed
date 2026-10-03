@@ -7,8 +7,8 @@ import { OverrideSettingsMenu } from "../../src/settings/menu/override-settings-
 
 function makeTheme(): Theme {
   return {
-    fg: (name: string, text: string) => text,
-    bg: (name: string, text: string) => text,
+    fg: (_name: string, text: string) => text,
+    bg: (_name: string, text: string) => text,
     bold: (text: string) => text,
     dim: (text: string) => text,
   } as unknown as Theme;

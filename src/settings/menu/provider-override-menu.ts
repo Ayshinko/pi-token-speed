@@ -14,6 +14,7 @@ import type {
   Thresholds,
 } from "../../config/types";
 import { DISPLAY_COLOR_LABELS } from "../../settings/items/display-colors/color";
+import { isScalarField } from "../../settings/utils";
 import { truecolor } from "../../ui/ansi";
 import { OverrideTierSubmenuBuilder } from "../../ui/color-picker";
 import { computeNextBlock } from "../../ui/editor/block-updaters";
@@ -149,12 +150,7 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
    * @param id The setting identifier.
    */
   protected override async resetScalar(id: string): Promise<void> {
-    const value =
-      id.startsWith("thresholds.") ||
-      id.startsWith("colors.") ||
-      id.startsWith("displayColors.")
-        ? ""
-        : BASE;
+    const value = isScalarField(id) ? BASE : "";
     await this.commit(id, value);
   }
 
@@ -236,9 +232,7 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
     const block = this.block();
     if (!this.settingsList) return;
     for (const item of Object.values(SETTINGS_ITEMS)) {
-      if (item.id.startsWith("thresholds") || item.id.startsWith("colors")) {
-        continue;
-      }
+      if (!isScalarField(item.id)) continue;
       this.settingsList.updateValue(item.id, fieldValue(item.id, block));
     }
   }
@@ -336,13 +330,7 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
 
     // Scalar settings (excludes grouped thresholds/colors)
     for (const item of Object.values(SETTINGS_ITEMS)) {
-      if (
-        item.id.startsWith("thresholds") ||
-        item.id.startsWith("colors") ||
-        item.id.startsWith("displayColors")
-      ) {
-        continue;
-      }
+      if (!isScalarField(item.id)) continue;
       const hasField = item.id in block;
       items.push({
         id: item.id,

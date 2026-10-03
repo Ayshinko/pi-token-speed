@@ -58,7 +58,7 @@ export class OverrideValidator {
   /** Scalar keys: delegate to each SettingItem's validate() (skip composites). */
   private validateScalars(
     cleaned: ProviderOverride,
-    errors: string[],
+    _errors: string[],
     drop: (key: string, detail: string) => void,
   ): void {
     for (const item of Object.values(SETTINGS_ITEMS)) {

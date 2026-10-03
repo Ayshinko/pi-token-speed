@@ -12,6 +12,7 @@ import { InputDialog } from "../../ui/dialog/input-dialog";
 import type { ResettableSettingsList } from "../../ui/resettable-settings-list";
 import { SETTINGS_ITEMS } from "../defaults";
 import { TIERS } from "../options";
+import { isScalarField } from "../utils";
 import { AbstractSettingsMenu } from "./abstract-settings-menu";
 import { ProviderOverrideMenu } from "./provider-override-menu";
 
@@ -34,7 +35,6 @@ export interface OverrideSettingsMenuOptions {
  */
 export class OverrideSettingsMenu extends AbstractSettingsMenu {
   override settingsList: ResettableSettingsList | null = null;
-  private submenuOpen = false;
   private tui: TUI | null = null;
   private theme: Theme | null = null;
   private keybindings: KeybindingsManager | null = null;
@@ -60,7 +60,6 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
     keybindings: KeybindingsManager,
     done: (value?: string) => void,
   ): SettingsList {
-    this.submenuOpen = false;
     this.tui = tui;
     this.theme = theme;
     this.keybindings = keybindings;
@@ -92,7 +91,6 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
       description: "(a) add provider · (d) remove provider",
       currentValue: this.formatOverrideSummary(this.opts.overrides[id] ?? {}),
       submenu: (_cv: string, submenuDone: (value?: string) => void) => {
-        this.submenuOpen = true;
         return this.createBlockList(id, theme, tui, submenuDone);
       },
     }));
@@ -104,8 +102,7 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
   private formatOverrideSummary(block: ProviderOverride): string {
     const parts: string[] = [];
     for (const item of Object.values(SETTINGS_ITEMS)) {
-      if (item.id.startsWith("thresholds") || item.id.startsWith("colors"))
-        continue;
+      if (!isScalarField(item.id)) continue;
       if (item.id in block) {
         parts.push(
           `${item.id}: ${item.formatPartial(block, settings.getConfig()) ?? ""}`,
@@ -156,7 +153,6 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
     });
 
     return menu.create(tui, theme, this.keybindings!, () => {
-      this.submenuOpen = false;
       done(undefined);
     });
   }

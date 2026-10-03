@@ -53,7 +53,7 @@ const fakeConfig: TokenSpeedConfig = {
 vi.mock("../src/config/settings", () => ({
   settings: {
     getConfig: () => fakeConfig,
-    getEffectiveConfig: (providerId?: string) => fakeConfig,
+    getEffectiveConfig: (_providerId?: string) => fakeConfig,
   },
 }));
 

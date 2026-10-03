@@ -156,7 +156,7 @@ export class TierSubmenuBuilder {
    * @param value The resolved threshold value.
    * @returns The description text.
    */
-  protected thresholdDescription(tier: TierInfo, value: number): string {
+  protected thresholdDescription(tier: TierInfo, _value: number): string {
     return `TPS threshold for the ${tier.label.toLowerCase()} tier`;
   }
 
@@ -167,7 +167,7 @@ export class TierSubmenuBuilder {
    * @param value The resolved threshold value.
    * @returns The display string.
    */
-  protected thresholdCurrentValue(tier: TierInfo, value: number): string {
+  protected thresholdCurrentValue(_tier: TierInfo, value: number): string {
     return value.toString();
   }
 
@@ -178,7 +178,7 @@ export class TierSubmenuBuilder {
    * @param value The resolved threshold value.
    * @returns The initial input string.
    */
-  protected thresholdInitialValue(tier: TierInfo, value: number): string {
+  protected thresholdInitialValue(_tier: TierInfo, value: number): string {
     return value.toString();
   }
 
@@ -189,7 +189,7 @@ export class TierSubmenuBuilder {
    * @param value The resolved threshold value.
    * @returns The message text.
    */
-  protected thresholdMessage(tier: TierInfo, value: number): string {
+  protected thresholdMessage(tier: TierInfo, _value: number): string {
     return `TPS threshold for the ${tier.label.toLowerCase()} tier`;
   }
 
@@ -215,7 +215,7 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The description text.
    */
-  protected colorDescription(tier: TierInfo, hex: string): string {
+  protected colorDescription(tier: TierInfo, _hex: string): string {
     return `Hex color for the ${tier.label.toLowerCase()} tier`;
   }
 
@@ -226,7 +226,7 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The display string.
    */
-  protected colorCurrentValue(tier: TierInfo, hex: string): string {
+  protected colorCurrentValue(_tier: TierInfo, hex: string): string {
     return hex;
   }
 
@@ -237,7 +237,7 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The initial input string.
    */
-  protected colorInitialValue(tier: TierInfo, hex: string): string {
+  protected colorInitialValue(_tier: TierInfo, hex: string): string {
     return hex;
   }
 
@@ -248,7 +248,7 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The message text.
    */
-  protected colorMessage(tier: TierInfo, hex: string): string {
+  protected colorMessage(tier: TierInfo, _hex: string): string {
     return `Hex color for the ${tier.label.toLowerCase()} tier`;
   }
 
@@ -269,7 +269,10 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The description text.
    */
-  protected displayColorDescription(key: DisplayColorKey, hex: string): string {
+  protected displayColorDescription(
+    key: DisplayColorKey,
+    _hex: string,
+  ): string {
     return `Hex color for the ${key} part of the status bar suffix`;
   }
 
@@ -281,7 +284,7 @@ export class TierSubmenuBuilder {
    * @returns The display string.
    */
   protected displayColorCurrentValue(
-    key: DisplayColorKey,
+    _key: DisplayColorKey,
     hex: string,
   ): string {
     return hex || "(none)";
@@ -295,7 +298,7 @@ export class TierSubmenuBuilder {
    * @returns The initial input string.
    */
   protected displayColorInitialValue(
-    key: DisplayColorKey,
+    _key: DisplayColorKey,
     hex: string,
   ): string {
     return hex;
@@ -308,7 +311,7 @@ export class TierSubmenuBuilder {
    * @param hex The resolved hex color.
    * @returns The message text.
    */
-  protected displayColorMessage(key: DisplayColorKey, hex: string): string {
+  protected displayColorMessage(key: DisplayColorKey, _hex: string): string {
     return `Hex color for the ${key} part of the status bar suffix`;
   }
 

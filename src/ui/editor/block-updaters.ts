@@ -7,6 +7,7 @@ import type {
 } from "../../config/types";
 import { SETTINGS_ITEMS } from "../../settings/defaults";
 import { isAscendingThresholds } from "../../settings/items/tiers/validation";
+import { isScalarField } from "../../settings/utils";
 
 /** Label shown for fields not set in the override block. */
 const BASE = "(base)";
@@ -41,12 +42,7 @@ export interface BlockUpdater {
  */
 export class ScalarBlockUpdater implements BlockUpdater {
   appliesTo(id: string): boolean {
-    const item = SETTINGS_ITEMS[id];
-    return (
-      item !== undefined &&
-      !id.startsWith("thresholds") &&
-      !id.startsWith("colors")
-    );
+    return SETTINGS_ITEMS[id] !== undefined && isScalarField(id);
   }
 
   compute(
