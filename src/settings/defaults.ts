@@ -3,6 +3,8 @@ import { COLOR_ITEMS } from "./items/colors";
 import { ColorsGroupSettingsItem } from "./items/colors/group";
 import { CountStrategySettingsItem } from "./items/count-strategy";
 import { DisplaySettingsItem } from "./items/display";
+import { DISPLAY_COLOR_ITEMS } from "./items/display-colors";
+import { DisplayColorsGroupSettingsItem } from "./items/display-colors/group";
 import { EndTpsBehaviorSettingsItem } from "./items/end-tps-behavior";
 import { FormatDurationSettingsItem } from "./items/format-duration";
 import { IconSettingsItem } from "./items/icon";
@@ -26,6 +28,7 @@ export const SETTINGS_ITEMS: Record<string, SettingsItem> = {
   formatDuration: new FormatDurationSettingsItem(),
   thresholds: new ThresholdsGroupSettingsItem(),
   colors: new ColorsGroupSettingsItem(),
+  displayColors: new DisplayColorsGroupSettingsItem(),
 };
 
 export const TIER_SETTINGS_ITEMS: Record<string, SettingsItem> = {
@@ -34,5 +37,14 @@ export const TIER_SETTINGS_ITEMS: Record<string, SettingsItem> = {
   ),
   ...Object.fromEntries(
     Object.entries(COLOR_ITEMS).map(([k, v]) => [`colors.${k}`, v]),
+  ),
+};
+
+export const DISPLAY_COLOR_SETTINGS_ITEMS: Record<string, SettingsItem> = {
+  ...Object.fromEntries(
+    Object.entries(DISPLAY_COLOR_ITEMS).map(([k, v]) => [
+      `displayColors.${k}`,
+      v,
+    ]),
   ),
 };

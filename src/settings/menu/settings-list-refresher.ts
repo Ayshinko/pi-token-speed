@@ -1,6 +1,7 @@
 import type { SettingItem } from "@earendil-works/pi-tui";
-import type { Colors, Thresholds } from "../../config/types";
+import type { Colors, DisplayColors, Thresholds } from "../../config/types";
 import { truecolor } from "../../ui/ansi";
+import { DISPLAY_COLOR_LABELS } from "../items/display-colors/color";
 import { TIERS } from "../options";
 import type { AbstractSettingsMenu } from "./abstract-settings-menu";
 
@@ -10,6 +11,7 @@ import type { AbstractSettingsMenu } from "./abstract-settings-menu";
 export interface ValueSource {
   getThresholds(): Thresholds;
   getColors(): Colors;
+  getDisplayColors(): DisplayColors;
 }
 
 /**
@@ -89,6 +91,54 @@ export class SettingsListRefresher {
           );
           if (item) {
             item.label = `${truecolor("■", colors[key])} ${label}`;
+          }
+        }
+      }
+      this.menu.activeSubmenuList.invalidate();
+    }
+  }
+
+  /**
+   * Refreshes display color items in the stored submenu
+   * and the active submenu (if displayColors is open).
+   *
+   * Does NOT update the group row — callers should update that themselves.
+   */
+  refreshDisplayColors(): void {
+    const displayColors = this.source.getDisplayColors();
+
+    if (this.menu.displayColorSubmenuItems) {
+      for (const key of ["count", "elapsed", "ttft"] as const) {
+        const item = this.menu.displayColorSubmenuItems.find(
+          (i) => i.id === `displayColors.${key}`,
+        );
+        if (item) {
+          item.label = `${truecolor("■", displayColors[key])} ${
+            DISPLAY_COLOR_LABELS[key]
+          }`;
+          item.currentValue = displayColors[key] || "(none)";
+        }
+      }
+    }
+
+    if (this.menu.activeSubmenuList) {
+      for (const key of ["count", "elapsed", "ttft"] as const) {
+        this.menu.activeSubmenuList.updateValue(
+          `displayColors.${key}`,
+          displayColors[key] || "(none)",
+        );
+        const internalItems = (
+          this.menu.activeSubmenuList as unknown as { items: SettingItem[] }
+        ).items;
+        if (internalItems) {
+          const item = internalItems.find(
+            (i: SettingItem) => i.id === `displayColors.${key}`,
+          );
+          if (item) {
+            item.label = `${truecolor("■", displayColors[key])} ${
+              DISPLAY_COLOR_LABELS[key]
+            }`;
+            item.currentValue = displayColors[key] || "(none)";
           }
         }
       }

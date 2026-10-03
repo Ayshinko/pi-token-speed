@@ -3,6 +3,16 @@ import { type DisplayMode } from "../settings/items/display";
 import { type EndTpsBehavior } from "../settings/items/end-tps-behavior";
 
 /**
+ * Status bar suffix parts that can be colorized.
+ */
+export type DisplayColorKey = "count" | "elapsed" | "ttft";
+
+/**
+ * Hex color (`#RRGGBB`) for each colorizable suffix part.
+ */
+export interface DisplayColors extends Record<DisplayColorKey, string> {}
+
+/**
  * TPS tier names, shared by the threshold and color groups.
  */
 export type TierName = "slow" | "medium" | "fast" | "blazing";
@@ -43,18 +53,20 @@ interface TokenSpeedConfigFields {
   formatDuration: boolean;
   thresholds: Thresholds;
   colors: Colors;
+  displayColors: DisplayColors;
 }
 
 /**
  * Partial config that may override any top-level base key.
  * Omitted keys fall back to the base config at resolution time;
- * `thresholds`/`colors` merge per-tier.
+ * `thresholds`/`colors`/`displayColors` merge per-key.
  */
 export type ProviderOverride = Partial<
-  Omit<TokenSpeedConfigFields, "thresholds" | "colors">
+  Omit<TokenSpeedConfigFields, "thresholds" | "colors" | "displayColors">
 > & {
   thresholds?: Partial<Thresholds>;
   colors?: Partial<Colors>;
+  displayColors?: Partial<DisplayColors>;
   formatDuration?: boolean;
 };
 
@@ -81,10 +93,11 @@ export interface TokenSpeedConfig extends TokenSpeedConfigFields {
  * Used for merging user settings over defaults without wiping sibling tiers.
  */
 export type PartialConfig = Partial<
-  Omit<TokenSpeedConfigFields, "thresholds" | "colors">
+  Omit<TokenSpeedConfigFields, "thresholds" | "colors" | "displayColors">
 > & {
   thresholds?: Partial<Thresholds>;
   colors?: Partial<Colors>;
+  displayColors?: Partial<DisplayColors>;
   formatDuration?: boolean;
   providerOverrides?: ProviderOverrides;
 };

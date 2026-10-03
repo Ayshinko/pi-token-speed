@@ -22,6 +22,7 @@ export abstract class AbstractSettingsMenu {
   activeSubmenuList: SettingsList | null = null;
   colorSubmenuItems: SettingItem[] | null = null;
   thresholdSubmenuItems: SettingItem[] | null = null;
+  displayColorSubmenuItems: SettingItem[] | null = null;
   /** The main settings list (set after `create()` is called). */
   settingsList: SettingsList | null = null;
 
@@ -78,8 +79,13 @@ export abstract class AbstractSettingsMenu {
     tui: TUI,
   ): SettingsList {
     const isThresholds = items.some((i) => i.id.startsWith("thresholds."));
+    const isDisplayColors = items.some((i) =>
+      i.id.startsWith("displayColors."),
+    );
     if (isThresholds) {
       this.thresholdSubmenuItems = items;
+    } else if (isDisplayColors) {
+      this.displayColorSubmenuItems = items;
     } else {
       this.colorSubmenuItems = items;
     }
@@ -93,6 +99,8 @@ export abstract class AbstractSettingsMenu {
         this.activeSubmenuList = null;
         if (isThresholds) {
           this.thresholdSubmenuItems = null;
+        } else if (isDisplayColors) {
+          this.displayColorSubmenuItems = null;
         } else {
           this.colorSubmenuItems = null;
         }
@@ -115,6 +123,8 @@ export abstract class AbstractSettingsMenu {
       this.refreshThresholdItems();
     } else if (id.startsWith("colors.") || id === "colors") {
       this.refreshColorItems();
+    } else if (id.startsWith("displayColors.") || id === "displayColors") {
+      this.refreshDisplayColorItems();
     }
   }
 
@@ -154,8 +164,14 @@ export abstract class AbstractSettingsMenu {
    * @param id The setting identifier.
    */
   protected async resetSetting(id: string): Promise<void> {
-    if (id === "thresholds" || id === "colors") {
+    if (id === "thresholds" || id === "colors" || id === "displayColors") {
       await this.resetGroup(id);
+    } else if (
+      id.startsWith("thresholds.") ||
+      id.startsWith("colors.") ||
+      id.startsWith("displayColors.")
+    ) {
+      await this.resetScalar(id);
     } else {
       await this.resetScalar(id);
     }
@@ -220,6 +236,14 @@ export abstract class AbstractSettingsMenu {
    * and active submenu (if colors is open).
    */
   protected refreshColorItems(): void {
+    // Subclasses override this to update their settingsList
+  }
+
+  /**
+   * Refreshes display color values across the main list, display color submenu,
+   * and active submenu (if displayColors is open).
+   */
+  protected refreshDisplayColorItems(): void {
     // Subclasses override this to update their settingsList
   }
 

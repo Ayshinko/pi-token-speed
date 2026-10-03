@@ -68,6 +68,7 @@ class Settings {
         fast: COLOR_FAST,
         blazing: COLOR_BLAZING,
       },
+      displayColors: { count: "", elapsed: "", ttft: "" },
       providerOverrides: {},
       ...scalars,
     } as TokenSpeedConfig;

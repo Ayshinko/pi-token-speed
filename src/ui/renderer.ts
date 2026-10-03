@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { STATUS_KEY } from "../config/constants";
 import { settings } from "../config/settings";
-import type { TokenSpeedConfig } from "../config/types";
+import type { DisplayColors, TokenSpeedConfig } from "../config/types";
 import { TokenSpeedEngine } from "../core/engine";
 import { type DisplayMode } from "../settings/items/display";
 import { truecolor } from "./ansi";
@@ -12,6 +12,8 @@ import { truecolor } from "./ansi";
 interface StatsFormatOptions {
   /** Show elapsed time in human-readable units. */
   formatDuration?: boolean;
+  /** Hex colors for the suffix parts ("" = uncolored). */
+  displayColors?: DisplayColors;
 }
 
 /**
@@ -68,6 +70,7 @@ export class Renderer {
     // Build the suffix based on display mode
     const suffix = this.buildSuffix(config.display, {
       formatDuration: config.formatDuration,
+      displayColors: config.displayColors,
     });
 
     const icon = config.icon ? `${config.icon} ` : "";
@@ -140,6 +143,7 @@ export class Renderer {
 
   /**
    * Formats the stats portion: "<x> tok in <y>s" (or human-readable units).
+   * Colors via `opts.displayColors` when set.
    *
    * @param tokenCount The number of tokens
    * @param elapsedSeconds The elapsed time in seconds
@@ -151,13 +155,22 @@ export class Renderer {
     elapsedSeconds: number,
     opts: StatsFormatOptions,
   ): string {
-    if (elapsedSeconds <= 0) return `${tokenCount} tok`;
+    const colors = opts.displayColors ?? { count: "", elapsed: "", ttft: "" };
+    const countColored = colors.count
+      ? truecolor(`${tokenCount} tok`, colors.count)
+      : `${tokenCount} tok`;
 
-    const elapsed = opts.formatDuration
+    if (elapsedSeconds <= 0) return countColored;
+
+    const elapsedStr = opts.formatDuration
       ? this.formatDuration(elapsedSeconds)
       : `${elapsedSeconds.toFixed(1)}s`;
 
-    return `${tokenCount} tok in ${elapsed}`;
+    const elapsedColored = colors.elapsed
+      ? truecolor(elapsedStr, colors.elapsed)
+      : elapsedStr;
+
+    return `${countColored} in ${elapsedColored}`;
   }
 
   private readonly RENDER_SUFFIXES: Record<
@@ -170,11 +183,20 @@ export class Renderer {
     ) => string
   > = {
     tps: () => "\u200b",
-    ttft: (ttft) => ` (TTFT: ${ttft} ms)\u200b`,
+    ttft: (ttft, _, __, opts) =>
+      ` (TTFT: ${
+        opts.displayColors?.ttft
+          ? truecolor(`${ttft} ms`, opts.displayColors.ttft)
+          : `${ttft} ms`
+      })\u200b`,
     stats: (_, tokens, elapsed, opts) =>
       ` (${this.formatStats(tokens, elapsed, opts)})\u200b`,
     full: (ttft, tokens, elapsed, opts) =>
-      ` (${this.formatStats(tokens, elapsed, opts)} · TTFT: ${ttft} ms)\u200b`,
+      ` (${this.formatStats(tokens, elapsed, opts)} · TTFT: ${
+        opts.displayColors?.ttft
+          ? truecolor(`${ttft} ms`, opts.displayColors.ttft)
+          : `${ttft} ms`
+      })\u200b`,
   };
 
   /**

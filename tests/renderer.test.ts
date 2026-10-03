@@ -26,6 +26,7 @@ const makeConfig = (
     fast: "#44cc44",
     blazing: "#00ccff",
   },
+  displayColors: { count: "", elapsed: "", ttft: "" },
   providerOverrides: {},
   ...partial,
 });
@@ -425,6 +426,131 @@ describe("Renderer", () => {
       (renderer as any).lastUpdateTime = 1000;
       renderer.resetThrottle();
       expect((renderer as any).lastUpdateTime).toBe(0);
+    });
+  });
+
+  // ---- formatStats (displayColors) ----
+
+  describe("formatStats (displayColors)", () => {
+    it("returns plain text when no colors are set", () => {
+      const colors = { count: "", elapsed: "", ttft: "" };
+      expect(
+        (renderer as any).formatStats(150, 6.0, { displayColors: colors }),
+      ).toBe("150 tok in 6.0s");
+    });
+
+    it("colors the count when count color is set", () => {
+      const colors = { count: "#00ff88", elapsed: "", ttft: "" };
+      const result = (renderer as any).formatStats(150, 6.0, {
+        displayColors: colors,
+      });
+      expect(result).toContain("\x1b[38;2;0;255;136m150 tok\x1b[0m");
+    });
+
+    it("colors the elapsed when elapsed color is set", () => {
+      const colors = { count: "", elapsed: "#ffaa00", ttft: "" };
+      const result = (renderer as any).formatStats(150, 6.0, {
+        displayColors: colors,
+      });
+      expect(result).toContain("\x1b[38;2;255;170;0m6.0s\x1b[0m");
+    });
+
+    it("colors all parts when all colors are set", () => {
+      const colors = { count: "#00ff88", elapsed: "#ffaa00", ttft: "" };
+      const result = (renderer as any).formatStats(150, 6.0, {
+        displayColors: colors,
+      });
+      expect(result).toContain("\x1b[38;2;0;255;136m150 tok\x1b[0m");
+      expect(result).toContain("\x1b[38;2;255;170;0m6.0s\x1b[0m");
+    });
+
+    it("returns count-only when elapsed is zero", () => {
+      const colors = { count: "", elapsed: "", ttft: "" };
+      expect(
+        (renderer as any).formatStats(150, 0, { displayColors: colors }),
+      ).toBe("150 tok");
+    });
+
+    it("colors the formatted duration when formatDuration is on", () => {
+      const colors = { count: "", elapsed: "#ffaa00", ttft: "" };
+      const result = (renderer as any).formatStats(150, 92.34, {
+        formatDuration: true,
+        displayColors: colors,
+      });
+      expect(result).toContain("\x1b[38;2;255;170;0m1m 32.3s\x1b[0m");
+    });
+
+    it("lowercases accepted hex values", () => {
+      const result = (renderer as any).formatStats(100, 1.0, {
+        displayColors: { count: "#AABBCC", elapsed: "", ttft: "" },
+      });
+      expect(result).toContain("\x1b[38;2;170;187;204m");
+    });
+  });
+
+  // ---- buildSuffix (displayColors) ----
+
+  describe("buildSuffix (displayColors)", () => {
+    it("applies colors in stats mode", () => {
+      configRef.current = makeConfig({
+        display: "stats",
+        displayColors: { count: "#00ff88", elapsed: "#ffaa00", ttft: "" },
+      });
+      renderer = new Renderer(engine);
+      engine["_tokenCount"] = 200;
+      engine["_startTime"] = Date.now() - 5000;
+      engine["_endTime"] = Date.now();
+
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalled();
+      const calledWith = setStatusSpy.mock.calls[0][1] as string;
+      expect(calledWith).toContain("\x1b[38;2;0;255;136m");
+      expect(calledWith).toContain("\x1b[38;2;255;170;0m");
+    });
+
+    it("applies TTFT color in ttft mode", () => {
+      configRef.current = makeConfig({
+        display: "ttft",
+        displayColors: { count: "", elapsed: "", ttft: "#44ddff" },
+      });
+      renderer = new Renderer(engine);
+      engine["_ttftEnd"] = 450;
+      engine["_ttftStart"] = 0;
+
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalled();
+      const calledWith = setStatusSpy.mock.calls[0][1] as string;
+      expect(calledWith).toContain("\x1b[38;2;68;221;255m");
+    });
+
+    it("applies all colors in full mode", () => {
+      configRef.current = makeConfig({
+        display: "full",
+        displayColors: {
+          count: "#00ff88",
+          elapsed: "#ffaa00",
+          ttft: "#44ddff",
+        },
+      });
+      renderer = new Renderer(engine);
+      engine["_tokenCount"] = 200;
+      engine["_startTime"] = Date.now() - 5000;
+      engine["_endTime"] = Date.now();
+      engine["_ttftEnd"] = 300;
+      engine["_ttftStart"] = 0;
+
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      (renderer as any).render(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalled();
+      const calledWith = setStatusSpy.mock.calls[0][1] as string;
+      expect(calledWith).toContain("\x1b[38;2;0;255;136m");
+      expect(calledWith).toContain("\x1b[38;2;255;170;0m");
+      expect(calledWith).toContain("\x1b[38;2;68;221;255m");
     });
   });
 });

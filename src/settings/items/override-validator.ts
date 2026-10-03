@@ -1,5 +1,6 @@
 import type {
   Colors,
+  DisplayColors,
   ProviderOverride,
   Thresholds,
   TierName,
@@ -7,6 +8,7 @@ import type {
 } from "../../config/types";
 import { SETTINGS_ITEMS } from "../defaults";
 import { COLOR_ITEMS } from "./colors";
+import { DISPLAY_COLOR_ITEMS } from "./display-colors";
 import { THRESHOLD_ITEMS } from "./thresholds";
 import { isAscendingThresholds, isValidHex } from "./tiers/validation";
 
@@ -48,6 +50,7 @@ export class OverrideValidator {
     this.validateScalars(cleaned, errors, drop);
     this.validateThresholds(cleaned, errors, drop);
     this.validateColors(cleaned, errors, drop);
+    this.validateDisplayColors(cleaned, errors, drop);
 
     return { config: cleaned, errors };
   }
@@ -62,7 +65,8 @@ export class OverrideValidator {
       if (
         item.id in cleaned &&
         item.id !== "thresholds" &&
-        item.id !== "colors"
+        item.id !== "colors" &&
+        item.id !== "displayColors"
       ) {
         const result = item.validate(
           cleaned[item.id as keyof ProviderOverride],
@@ -159,6 +163,47 @@ export class OverrideValidator {
       cleaned.colors = partial;
     } else {
       delete cleaned.colors;
+    }
+  }
+
+  /** DisplayColors: keep only valid keys with hex values. */
+  private validateDisplayColors(
+    cleaned: ProviderOverride,
+    errors: string[],
+    drop: (key: string, detail: string) => void,
+  ): void {
+    if (cleaned.displayColors === undefined) return;
+    const raw = cleaned.displayColors;
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      drop("displayColors", "Invalid displayColors (expected object)");
+      return;
+    }
+
+    const partial: Partial<DisplayColors> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      const keyItem =
+        DISPLAY_COLOR_ITEMS[key as keyof typeof DISPLAY_COLOR_ITEMS];
+      if (keyItem) {
+        const result = keyItem.validate(value);
+        if (result.valid) {
+          partial[key as keyof DisplayColors] =
+            typeof value === "string" ? value.toLowerCase() : value;
+        } else {
+          errors.push(
+            `- providerOverrides["${this.providerId}"]: Invalid displayColors.${key} "${value}" (expected hex like '#00ff88') — key falls back to base.`,
+          );
+        }
+      } else {
+        errors.push(
+          `- providerOverrides["${this.providerId}"]: Invalid displayColors.${key} "${value}" (unknown key) — key falls back to base.`,
+        );
+      }
+    }
+
+    if (Object.keys(partial).length > 0) {
+      cleaned.displayColors = partial;
+    } else {
+      delete cleaned.displayColors;
     }
   }
 }

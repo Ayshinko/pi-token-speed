@@ -1,5 +1,9 @@
 import { settings } from "../../config/settings";
-import type { ProviderOverride, TierName } from "../../config/types";
+import type {
+  DisplayColorKey,
+  ProviderOverride,
+  TierName,
+} from "../../config/types";
 import { SETTINGS_ITEMS } from "../../settings/defaults";
 import { TIERS } from "../../settings/options";
 import { truecolor } from "../ansi";
@@ -12,7 +16,12 @@ export const BASE = "(base)";
  */
 export function fieldValue(id: string, block: ProviderOverride): string {
   const item = SETTINGS_ITEMS[id];
-  if (item && !id.startsWith("thresholds") && !id.startsWith("colors")) {
+  if (
+    item &&
+    !id.startsWith("thresholds") &&
+    !id.startsWith("colors") &&
+    !id.startsWith("displayColors")
+  ) {
     return id in block
       ? (item.formatPartial(block, settings.getConfig()) ?? BASE)
       : BASE;
@@ -28,6 +37,14 @@ export function fieldValue(id: string, block: ProviderOverride): string {
       truecolor("■", block.colors?.[t.key] ?? base.colors[t.key]),
     ).join(" ");
   }
+  if (id === "displayColors") {
+    const base = settings.getConfig();
+    return (["count", "elapsed", "ttft"] as DisplayColorKey[])
+      .map((key) =>
+        truecolor("■", block.displayColors?.[key] ?? base.displayColors[key]),
+      )
+      .join(" ");
+  }
   if (id.startsWith("thresholds.")) {
     const tier = id.slice("thresholds.".length) as TierName;
     return block.thresholds?.[tier]?.toString() ?? BASE;
@@ -35,6 +52,10 @@ export function fieldValue(id: string, block: ProviderOverride): string {
   if (id.startsWith("colors.")) {
     const tier = id.slice("colors.".length) as TierName;
     return block.colors?.[tier] ?? BASE;
+  }
+  if (id.startsWith("displayColors.")) {
+    const key = id.slice("displayColors.".length) as DisplayColorKey;
+    return block.displayColors?.[key] ?? BASE;
   }
   return "";
 }

@@ -6,10 +6,19 @@ import type {
   TUI,
 } from "@earendil-works/pi-tui";
 import { settings } from "../../config/settings";
-import type { Colors, Thresholds, TokenSpeedConfig } from "../../config/types";
+import type {
+  Colors,
+  DisplayColors,
+  Thresholds,
+  TokenSpeedConfig,
+} from "../../config/types";
 import { truecolor } from "../../ui/ansi";
 import { TierSubmenuBuilder } from "../../ui/color-picker";
-import { SETTINGS_ITEMS, TIER_SETTINGS_ITEMS } from "../defaults";
+import {
+  DISPLAY_COLOR_SETTINGS_ITEMS,
+  SETTINGS_ITEMS,
+  TIER_SETTINGS_ITEMS,
+} from "../defaults";
 import { TIERS } from "../options";
 import { AbstractSettingsMenu } from "./abstract-settings-menu";
 import { SettingsListRefresher } from "./settings-list-refresher";
@@ -43,6 +52,10 @@ export class SettingsMenu extends AbstractSettingsMenu {
 
   getColors(): Colors {
     return settings.getConfig().colors;
+  }
+
+  getDisplayColors(): DisplayColors {
+    return settings.getConfig().displayColors;
   }
 
   /**
@@ -82,7 +95,10 @@ export class SettingsMenu extends AbstractSettingsMenu {
    */
   protected override async commit(id: string, value: string): Promise<boolean> {
     const config = settings.getConfig();
-    const item = SETTINGS_ITEMS[id] ?? TIER_SETTINGS_ITEMS[id];
+    const item =
+      SETTINGS_ITEMS[id] ??
+      TIER_SETTINGS_ITEMS[id] ??
+      DISPLAY_COLOR_SETTINGS_ITEMS[id];
     if (!item) return false;
     const result = item.setConfig(config, value);
     if (!result.valid) {
@@ -113,7 +129,10 @@ export class SettingsMenu extends AbstractSettingsMenu {
    * @param id The setting identifier.
    */
   protected override async resetScalar(id: string): Promise<void> {
-    const item = SETTINGS_ITEMS[id] ?? TIER_SETTINGS_ITEMS[id];
+    const item =
+      SETTINGS_ITEMS[id] ??
+      TIER_SETTINGS_ITEMS[id] ??
+      DISPLAY_COLOR_SETTINGS_ITEMS[id];
     if (!item) return;
     await settings.resetKeys([id]);
 
@@ -223,6 +242,34 @@ export class SettingsMenu extends AbstractSettingsMenu {
       });
     }
 
+    const displayColorsItem = SETTINGS_ITEMS["displayColors"];
+    if (displayColorsItem) {
+      const dc = config.displayColors;
+      const displayColorsDisplay = (["count", "elapsed", "ttft"] as const)
+        .map((key) => truecolor("■", dc[key]))
+        .join(" ");
+      items.push({
+        id: "displayColors",
+        label: displayColorsItem.label,
+        description: displayColorsItem.description,
+        currentValue: displayColorsDisplay,
+        submenu: (_currentValue: string, done) => {
+          const submenuItems = new TierSubmenuBuilder(
+            theme,
+            tui,
+          ).buildDisplayColors();
+          return this.createSubmenuList(
+            submenuItems,
+            Math.min(submenuItems.length + 2, 15),
+            (id, newValue) => this.handleSettingChange(id, newValue),
+            () => done(undefined),
+            (id) => this.resetSetting(id),
+            tui,
+          );
+        },
+      });
+    }
+
     return items;
   }
 
@@ -260,5 +307,26 @@ export class SettingsMenu extends AbstractSettingsMenu {
     }
 
     this.refresher.refreshColors();
+  }
+
+  /**
+   * Refreshes display color values across the main list, display color submenu,
+   * and active submenu (if displayColors is open).
+   */
+  override refreshDisplayColorItems(): void {
+    const config = settings.getConfig();
+    const dc = config.displayColors;
+
+    if (this.settingsList) {
+      this.settingsList.updateValue(
+        "displayColors",
+        (["count", "elapsed", "ttft"] as const)
+          .map((key) => truecolor("■", dc[key]))
+          .join(" "),
+      );
+      this.settingsList.invalidate();
+    }
+
+    this.refresher.refreshDisplayColors();
   }
 }

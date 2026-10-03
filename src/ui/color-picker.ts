@@ -2,10 +2,12 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { SettingItem, TUI } from "@earendil-works/pi-tui";
 import { settings } from "../config/settings";
 import type {
+  DisplayColorKey,
   ProviderOverride,
   TierName,
   TokenSpeedConfig,
 } from "../config/types";
+import { DISPLAY_COLOR_LABELS } from "../settings/items/display-colors/color";
 import { isValidHex } from "../settings/items/tiers/validation";
 import { TIERS } from "../settings/options";
 import { truecolor } from "./ansi";
@@ -88,6 +90,31 @@ export class TierSubmenuBuilder {
     });
   }
 
+  /**
+   * Builds the SettingsList items for the display color customization submenu.
+   *
+   * @returns Array of SettingItem for the display color submenu.
+   */
+  buildDisplayColors(): SettingItem[] {
+    return (["count", "elapsed", "ttft"] as DisplayColorKey[]).map((key) => {
+      const hex = this.resolveDisplayColor(key);
+      return {
+        id: `displayColors.${key}`,
+        label: `${truecolor(this.placeholder, hex)} ${DISPLAY_COLOR_LABELS[key]}`,
+        description: this.displayColorDescription(key, hex),
+        currentValue: this.displayColorCurrentValue(key, hex),
+        submenu: InputDialog.inputSubmenu(this.theme, this.tui, {
+          title: `${DISPLAY_COLOR_LABELS[key]} display color`,
+          message: this.displayColorMessage(key, hex),
+          placeholder: "#RRGGBB",
+          initialValue: this.displayColorInitialValue(key, hex),
+          createInput: () => new HexColorInput(),
+          validate: (raw) => this.validateDisplayColor(raw),
+        }),
+      };
+    });
+  }
+
   // ── Value resolvers ───────────────────────────────────────────────────
 
   /**
@@ -108,6 +135,16 @@ export class TierSubmenuBuilder {
    */
   protected resolveColor(tier: TierName): string {
     return settings.getConfig().colors[tier];
+  }
+
+  /**
+   * Resolves the configured hex display color for a key.
+   *
+   * @param key The display color key.
+   * @returns The hex color string ("" when unset).
+   */
+  protected resolveDisplayColor(key: DisplayColorKey): string {
+    return settings.getConfig().displayColors[key];
   }
 
   // ── Threshold formatting hooks ────────────────────────────────────────
@@ -224,6 +261,66 @@ export class TierSubmenuBuilder {
   protected validateColor(raw: string): string | null {
     return isValidHex(raw) ? raw.toLowerCase() : null;
   }
+
+  /**
+   * Description for a display color row.
+   *
+   * @param key The display color key.
+   * @param hex The resolved hex color.
+   * @returns The description text.
+   */
+  protected displayColorDescription(key: DisplayColorKey, hex: string): string {
+    return `Hex color for the ${key} part of the status bar suffix`;
+  }
+
+  /**
+   * Displayed current value for a display color row.
+   *
+   * @param key The display color key.
+   * @param hex The resolved hex color.
+   * @returns The display string.
+   */
+  protected displayColorCurrentValue(
+    key: DisplayColorKey,
+    hex: string,
+  ): string {
+    return hex || "(none)";
+  }
+
+  /**
+   * Initial input value when the display color dialog opens.
+   *
+   * @param key The display color key.
+   * @param hex The resolved hex color.
+   * @returns The initial input string.
+   */
+  protected displayColorInitialValue(
+    key: DisplayColorKey,
+    hex: string,
+  ): string {
+    return hex;
+  }
+
+  /**
+   * Message shown inside the display color input dialog.
+   *
+   * @param key The display color key.
+   * @param hex The resolved hex color.
+   * @returns The message text.
+   */
+  protected displayColorMessage(key: DisplayColorKey, hex: string): string {
+    return `Hex color for the ${key} part of the status bar suffix`;
+  }
+
+  /**
+   * Validates a raw display color input.
+   *
+   * @param raw The raw input string.
+   * @returns The normalized value, or null when invalid.
+   */
+  protected validateDisplayColor(raw: string): string | null {
+    return isValidHex(raw) ? raw.toLowerCase() : null;
+  }
 }
 
 /**
@@ -309,5 +406,46 @@ export class OverrideTierSubmenuBuilder extends TierSubmenuBuilder {
   protected override validateColor(raw: string): string | null {
     if (raw.trim() === "") return "";
     return super.validateColor(raw);
+  }
+
+  /** Reads from the override block, falling back to the base config. */
+  protected override resolveDisplayColor(key: DisplayColorKey): string {
+    return this.getBlock().displayColors?.[key] ?? this.base.displayColors[key];
+  }
+
+  protected override displayColorDescription(
+    key: DisplayColorKey,
+    _hex: string,
+  ): string {
+    return `Hex color override for the ${key} part (Base: ${this.base.displayColors[key] || "(none)"})`;
+  }
+
+  /** `(base)` marker when the key is not overridden. */
+  protected override displayColorCurrentValue(
+    key: DisplayColorKey,
+    _hex: string,
+  ): string {
+    return this.getBlock().displayColors?.[key] ?? BASE;
+  }
+
+  /** Empty initial value when the key is not overridden. */
+  protected override displayColorInitialValue(
+    key: DisplayColorKey,
+    _hex: string,
+  ): string {
+    return this.getBlock().displayColors?.[key] ?? "";
+  }
+
+  protected override displayColorMessage(
+    key: DisplayColorKey,
+    _hex: string,
+  ): string {
+    return `Hex color for the ${key} part (empty = reset to base: ${this.base.displayColors[key] || "(none)"})`;
+  }
+
+  /** Accepts an empty input as "reset to base". */
+  protected override validateDisplayColor(raw: string): string | null {
+    if (raw.trim() === "") return "";
+    return super.validateDisplayColor(raw);
   }
 }

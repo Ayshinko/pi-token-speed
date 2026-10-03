@@ -271,4 +271,26 @@ describe("validateOverride", () => {
     const { config } = validator.validate({});
     expect(config).toEqual({});
   });
+
+  it("keeps only valid displayColors keys and validates hex", () => {
+    const good = validator.validate({ displayColors: { count: "#AABBCC" } });
+    expect(good.errors).toEqual([]);
+    expect(good.config.displayColors).toEqual({ count: "#aabbcc" });
+  });
+
+  it("drops invalid displayColors values with a warning", () => {
+    const { config, errors } = validator.validate({
+      displayColors: { count: "not-a-color" },
+    });
+    expect(config.displayColors).toBeUndefined();
+    expect(errors[0]).toContain("Invalid displayColors.count");
+  });
+
+  it("drops non-object displayColors groups", () => {
+    const { config, errors } = validator.validate({
+      displayColors: "nope" as never,
+    });
+    expect(config.displayColors).toBeUndefined();
+    expect(errors.some((e) => e.includes("Invalid displayColors"))).toBe(true);
+  });
 });

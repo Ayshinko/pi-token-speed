@@ -8,10 +8,12 @@ import type {
 import { settings } from "../../config/settings";
 import type {
   Colors,
+  DisplayColors,
   ProviderOverride,
   ProviderOverrides,
   Thresholds,
 } from "../../config/types";
+import { DISPLAY_COLOR_LABELS } from "../../settings/items/display-colors/color";
 import { truecolor } from "../../ui/ansi";
 import { OverrideTierSubmenuBuilder } from "../../ui/color-picker";
 import { computeNextBlock } from "../../ui/editor/block-updaters";
@@ -82,6 +84,16 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
     };
   }
 
+  getDisplayColors(): DisplayColors {
+    const block = this.block();
+    const base = settings.getConfig();
+    return {
+      count: block.displayColors?.count ?? base.displayColors.count,
+      elapsed: block.displayColors?.elapsed ?? base.displayColors.elapsed,
+      ttft: block.displayColors?.ttft ?? base.displayColors.ttft,
+    };
+  }
+
   /**
    * Creates the override settings list UI for this provider.
    *
@@ -138,7 +150,11 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
    */
   protected override async resetScalar(id: string): Promise<void> {
     const value =
-      id.startsWith("thresholds.") || id.startsWith("colors.") ? "" : BASE;
+      id.startsWith("thresholds.") ||
+      id.startsWith("colors.") ||
+      id.startsWith("displayColors.")
+        ? ""
+        : BASE;
     await this.commit(id, value);
   }
 
@@ -146,7 +162,7 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
    * Resets a grouped setting by removing the entire group key from the
    * override block.
    *
-   * @param id The group identifier ("thresholds" or "colors").
+   * @param id The group identifier ("thresholds", "colors", or "displayColors").
    */
   protected override async resetGroup(id: string): Promise<void> {
     const current = this.block();
@@ -267,6 +283,39 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
     this.refresher.refreshColors();
   }
 
+  /**
+   * Refreshes display color rows: the group row, the stored submenu items
+   * (labels included), and the active submenu list (if open).
+   */
+  override refreshDisplayColorItems(): void {
+    const block = this.block();
+    const base = settings.getConfig();
+    this.settingsList?.updateValue(
+      "displayColors",
+      fieldValue("displayColors", block),
+    );
+
+    // Update display color submenu items (skip if threshold/colors submenu is open)
+    if (
+      !this.thresholdSubmenuItems &&
+      !this.colorSubmenuItems &&
+      this.displayColorSubmenuItems
+    ) {
+      for (const key of ["count", "elapsed", "ttft"] as const) {
+        const item = this.displayColorSubmenuItems.find(
+          (i) => i.id === `displayColors.${key}`,
+        );
+        if (item) {
+          const hex = block.displayColors?.[key] ?? base.displayColors[key];
+          item.label = `${truecolor("■", hex)} ${DISPLAY_COLOR_LABELS[key]}`;
+          item.currentValue = block.displayColors?.[key] ?? BASE;
+        }
+      }
+    }
+
+    this.refresher.refreshDisplayColors();
+  }
+
   // ── Item building ─────────────────────────────────────────────────────
 
   /**
@@ -287,7 +336,11 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
 
     // Scalar settings (excludes grouped thresholds/colors)
     for (const item of Object.values(SETTINGS_ITEMS)) {
-      if (item.id.startsWith("thresholds") || item.id.startsWith("colors")) {
+      if (
+        item.id.startsWith("thresholds") ||
+        item.id.startsWith("colors") ||
+        item.id.startsWith("displayColors")
+      ) {
         continue;
       }
       const hasField = item.id in block;
@@ -341,6 +394,27 @@ export class ProviderOverrideMenu extends AbstractSettingsMenu {
             new OverrideTierSubmenuBuilder(theme, tui, base, () =>
               this.block(),
             ).buildColors(),
+            submenuDone,
+            tui,
+          ),
+      });
+    }
+
+    const displayColorsItem = SETTINGS_ITEMS["displayColors"];
+    if (displayColorsItem) {
+      items.push({
+        id: "displayColors",
+        label: displayColorsItem.label,
+        description: "Customize suffix color overrides (count, elapsed, ttft)",
+        currentValue: fieldValue("displayColors", block),
+        submenu: (
+          _currentValue: string,
+          submenuDone: (value?: string) => void,
+        ) =>
+          this.openTierSubmenu(
+            new OverrideTierSubmenuBuilder(theme, tui, base, () =>
+              this.block(),
+            ).buildDisplayColors(),
             submenuDone,
             tui,
           ),

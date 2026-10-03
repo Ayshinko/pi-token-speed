@@ -1,5 +1,6 @@
 import { settings } from "../../config/settings";
 import type {
+  DisplayColorKey,
   ProviderOverride,
   Thresholds,
   TierName,
@@ -142,6 +143,38 @@ export class ColorBlockUpdater implements BlockUpdater {
 }
 
 /**
+ * Handles display color fields (e.g. "displayColors.count").
+ */
+export class DisplayColorBlockUpdater implements BlockUpdater {
+  appliesTo(id: string): boolean {
+    return id.startsWith("displayColors.");
+  }
+
+  compute(
+    block: ProviderOverride,
+    id: string,
+    value: string,
+  ): ProviderOverride | null {
+    const next: ProviderOverride = { ...block };
+    const key = id.slice("displayColors.".length) as DisplayColorKey;
+    const displayColors = { ...(block.displayColors ?? {}) };
+
+    if (value === "") {
+      delete displayColors[key];
+    } else {
+      displayColors[key] = value.toLowerCase();
+    }
+
+    if (Object.keys(displayColors).length > 0) {
+      next.displayColors = displayColors;
+    } else {
+      delete next.displayColors;
+    }
+    return next;
+  }
+}
+
+/**
  * Dispatches field updates to the appropriate BlockUpdater.
  *
  * @param block Current override block
@@ -160,6 +193,7 @@ export function computeNextBlock(
     new ScalarBlockUpdater(),
     new ThresholdBlockUpdater(),
     new ColorBlockUpdater(),
+    new DisplayColorBlockUpdater(),
   ];
 
   for (const updater of updaters) {

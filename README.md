@@ -85,6 +85,11 @@ Different providers stream at very different speeds and report tokens differentl
     "display": "tps",
     "useProviderTokens": false,
     "countStrategy": "direct",
+    "displayColors": {
+      "count": "#00ff88",
+      "elapsed": "#ffaa00",
+      "ttft": "#44ddff"
+    },
     "providerOverrides": {
       "anthropic": {
         "thresholds": {
@@ -117,25 +122,26 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 
 ### Configuration Options
 
-| Option               | Type                           | Default     | Description                                                                                 |
-| -------------------- | ------------------------------ | ----------- | ------------------------------------------------------------------------------------------- |
-| `thresholds.slow`    | number                         | `0`         | Minimum TPS threshold ("slow")                                                              |
-| `thresholds.medium`  | number                         | `15`        | TPS above this is "medium"                                                                  |
-| `thresholds.fast`    | number                         | `30`        | TPS above this is "fast"                                                                    |
-| `thresholds.blazing` | number                         | `45`        | TPS above this is "blazing"                                                                 |
-| `colors.slow`        | string                         | `"#ff4444"` | Color for slow tier                                                                         |
-| `colors.medium`      | string                         | `"#ffaa00"` | Color for medium tier                                                                       |
-| `colors.fast`        | string                         | `"#00ff88"` | Color for fast tier                                                                         |
-| `colors.blazing`     | string                         | `"#44ddff"` | Color for blazing tier                                                                      |
-| `slidingWindow`      | number                         | `1000`      | Sliding window duration in ms                                                               |
-| `display`            | `tps`, `ttft`, `stats`, `full` | `tps`       | Display mode (see [Display Modes](#display-modes))                                          |
-| `useProviderTokens`  | boolean                        | `false`     | Opt-in: use provider-reported count instead of the extension one                            |
-| `countStrategy`      | `estimate`, `direct`           | `direct`    | Token counting strategy used by the extension's own counter                                 |
-| `endTpsBehavior`     | `average`, `last`              | `average`   | What to show after streaming ends                                                           |
-| `icon`               | string                         | `"⚡"`      | Icon shown before TPS in the status bar                                                     |
-| `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                                          |
-| `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting)) |
-| `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))               |
+| Option               | Type                           | Default     | Description                                                                                       |
+| -------------------- | ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------- |
+| `thresholds.slow`    | number                         | `0`         | Minimum TPS threshold ("slow")                                                                    |
+| `thresholds.medium`  | number                         | `15`        | TPS above this is "medium"                                                                        |
+| `thresholds.fast`    | number                         | `30`        | TPS above this is "fast"                                                                          |
+| `thresholds.blazing` | number                         | `45`        | TPS above this is "blazing"                                                                       |
+| `colors.slow`        | string                         | `"#ff4444"` | Color for slow tier                                                                               |
+| `colors.medium`      | string                         | `"#ffaa00"` | Color for medium tier                                                                             |
+| `colors.fast`        | string                         | `"#00ff88"` | Color for fast tier                                                                               |
+| `colors.blazing`     | string                         | `"#44ddff"` | Color for blazing tier                                                                            |
+| `slidingWindow`      | number                         | `1000`      | Sliding window duration in ms                                                                     |
+| `display`            | `tps`, `ttft`, `stats`, `full` | `tps`       | Display mode (see [Display Modes](#display-modes))                                                |
+| `useProviderTokens`  | boolean                        | `false`     | Opt-in: use provider-reported count instead of the extension one                                  |
+| `countStrategy`      | `estimate`, `direct`           | `direct`    | Token counting strategy used by the extension's own counter                                       |
+| `endTpsBehavior`     | `average`, `last`              | `average`   | What to show after streaming ends                                                                 |
+| `icon`               | string                         | `"⚡"`      | Icon shown before TPS in the status bar                                                           |
+| `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                                                |
+| `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))       |
+| `displayColors`      | object                         | `{}`        | Hex colors for the suffix parts (see [Display Color Customization](#display-color-customization)) |
+| `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))                     |
 
 ### Interactive Menu
 
@@ -151,6 +157,7 @@ A small interactive menu is available when running `/tps` in the editor, where y
 - **Format duration** — show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))
 - **Thresholds** — customize the TPS threshold values for each tier (see [Threshold Customization](#threshold-customization))
 - **Colors** — customize the hex color for each TPS tier (see [Color Customization](#color-customization))
+- **Display colors** — customize the hex color for the suffix parts (count, elapsed, ttft) (see [Display Color Customization](#display-color-customization))
 
 Per-provider overrides are managed separately via `/tps overrides` (see [Provider Overrides](#provider-overrides)).
 
@@ -245,6 +252,34 @@ Alternatively, you can set colors directly in `~/.pi/agent/settings.json`:
   }
 }
 ```
+
+### Display Color Customization
+
+When using a display mode different than `tps`, the suffix parts (count, elapsed time, and TTFT) can be colorized independently via the `/tps` interactive menu by selecting **Display colors**. Each part opens a hex color input where you can enter a custom `#RRGGBB` value. By default, these parts remain uncolored (opt-in feature).
+
+Alternatively, you can set display colors directly in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "tokenSpeed": {
+    "displayColors": {
+      "count": "#00ff88",
+      "elapsed": "#ffaa00",
+      "ttft": "#44ddff"
+    }
+  }
+}
+```
+
+When set, the status bar suffix renders like:
+
+```
+⚡ TPS: 25.0 tok/s (150 tok in 6.0s · TTFT: 450 ms)
+```
+
+where "150 tok" is green, "6.0s" is orange, and "450 ms" is cyan.
+
+Display colors are independent from tier colors — they can be used together for a fully customized status bar.
 
 ### Threshold Customization
 

@@ -180,5 +180,6 @@ export function mergeConfig(
     ...partial,
     thresholds: { ...base.thresholds, ...partial.thresholds },
     colors: { ...base.colors, ...partial.colors },
+    displayColors: { ...base.displayColors, ...partial.displayColors },
   };
 }

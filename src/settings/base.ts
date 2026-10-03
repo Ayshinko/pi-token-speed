@@ -51,6 +51,10 @@ export abstract class SettingsItem {
       ...override_,
       thresholds: { ...defaults.thresholds, ...override_.thresholds },
       colors: { ...defaults.colors, ...override_.colors },
+      displayColors: {
+        ...defaults.displayColors,
+        ...override_.displayColors,
+      },
     };
   }
   abstract readonly id: string;

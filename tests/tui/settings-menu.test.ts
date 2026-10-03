@@ -27,6 +27,7 @@ const settingsState = vi.hoisted(() => {
       fast: "#44cc44",
       blazing: "#00ccff",
     },
+    displayColors: { count: "", elapsed: "", ttft: "" },
     providerOverrides: {},
   });
   let current: ReturnType<typeof makeDefaults> = makeDefaults();
@@ -59,6 +60,10 @@ async function mockSetConfig(partial: Record<string, unknown>): Promise<void> {
     colors: {
       ...current.colors,
       ...(partial.colors as Record<string, unknown> | undefined),
+    },
+    displayColors: {
+      ...current.displayColors,
+      ...(partial.displayColors as Record<string, unknown> | undefined),
     },
     providerOverrides: {
       ...current.providerOverrides,

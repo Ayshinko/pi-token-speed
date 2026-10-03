@@ -46,6 +46,7 @@ const fakeConfig: TokenSpeedConfig = {
     fast: COLOR_FAST,
     blazing: COLOR_BLAZING,
   },
+  displayColors: { count: "", elapsed: "", ttft: "" },
   providerOverrides: {},
 };
 
