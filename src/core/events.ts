@@ -6,32 +6,38 @@ import { TOKEN_GENERATION_TOOLS } from "../config/constants";
 import { settings } from "../config/settings";
 import { Renderer } from "../ui/renderer";
 import { TokenSpeedEngine } from "./engine";
-
-interface ToolCall {
-  type: string;
-  name?: string;
-}
-
-interface MessageUpdatePayload {
-  assistantMessageEvent: {
-    type: string;
-    delta?: string;
-    partial?: {
-      content?: ToolCall[];
-      usage?: { output?: number };
-    };
-    contentIndex?: number;
-  };
-}
+import type { MessageUpdatePayload } from "./message-handler";
+import { MessageHandlerRegistry } from "./message-handler";
+import {
+  DeltaHandler,
+  StreamStartHandler,
+  ToolcallDeltaHandler,
+  ToolcallEndHandler,
+} from "./message-handlers";
 
 /**
  * Manages all Pi event subscriptions for the token-speed extension.
  */
 export class EventManager {
+  private readonly registry: MessageHandlerRegistry;
+
   constructor(
     private readonly engine: TokenSpeedEngine,
     private readonly renderer: Renderer,
-  ) {}
+  ) {
+    this.registry = new MessageHandlerRegistry();
+    this.registry.register(
+      new StreamStartHandler(engine, (ctx) => ctx.model?.provider),
+    );
+    this.registry.register(new DeltaHandler(engine, renderer));
+    this.registry.register(new ToolcallDeltaHandler(engine, renderer));
+    this.registry.register(
+      new ToolcallEndHandler(
+        engine,
+        (name) => !TOKEN_GENERATION_TOOLS.has(name),
+      ),
+    );
+  }
 
   /**
    * Initializes the engine and renderer for a new session.
@@ -72,7 +78,7 @@ export class EventManager {
   }
 
   /**
-   * Routes delta events to the engine and updates the renderer.
+   * Routes message update events through the handler registry.
    *
    * @param event The message_update event payload.
    * @param ctx The Pi extension context.
@@ -81,48 +87,7 @@ export class EventManager {
     event: MessageUpdatePayload,
     ctx: ExtensionContext,
   ): void {
-    const ev = event.assistantMessageEvent;
-
-    if (
-      ev.type === "text_start" ||
-      ev.type === "thinking_start" ||
-      ev.type === "toolcall_start"
-    ) {
-      // Pick up provider overrides (e.g. after a model switch) before the
-      // new stream starts; applyProvider is a no-op when unchanged or when
-      // a stream is already active.
-      this.engine.applyProvider(ctx.model?.provider);
-      this.engine.stopTTFT();
-      this.engine.start();
-      return;
-    }
-
-    if (ev.type === "text_delta" || ev.type === "thinking_delta") {
-      this.engine.recordDelta(ev.delta ?? "", ev.partial?.usage?.output);
-      this.renderer.update(ctx);
-      return;
-    }
-
-    if (ev.type === "toolcall_delta") {
-      const toolCall = ev.partial?.content?.[ev.contentIndex ?? 0];
-      if (toolCall?.type !== "toolCall") return;
-
-      // Only edit/write tools are counted (token generation, relevant)
-      if (this.isTokenGenerationTool(toolCall)) {
-        this.engine.recordDelta(ev.delta ?? "", ev.partial?.usage?.output);
-        this.renderer.update(ctx);
-      }
-    }
-
-    if (ev.type === "toolcall_end") {
-      const toolCall = ev.partial?.content?.[ev.contentIndex ?? 0];
-      if (toolCall?.type !== "toolCall") return;
-
-      // Pause the timer for prompt processing tools, so they don't skew the average
-      if (this.isPromptProcessingTool(toolCall)) {
-        this.engine.pause();
-      }
-    }
+    this.registry.handle(event, ctx);
   }
 
   /**
@@ -147,25 +112,5 @@ export class EventManager {
 
     this.engine.reconcileTotal(outputTokens);
     this.renderer.update(ctx);
-  }
-
-  /**
-   * Determines if it's a tool that generates tokens
-   *
-   * @param tool The tool used by Pi
-   * @returns True if it's related to token generation
-   */
-  private isTokenGenerationTool(tool?: ToolCall): boolean {
-    return TOKEN_GENERATION_TOOLS.has(tool?.name ?? "");
-  }
-
-  /**
-   * Determines if it's a tool that processes tokens
-   *
-   * @param tool The tool used by Pi
-   * @returns True if it's related to prompt processing
-   */
-  private isPromptProcessingTool(tool?: ToolCall): boolean {
-    return !this.isTokenGenerationTool(tool);
   }
 }
