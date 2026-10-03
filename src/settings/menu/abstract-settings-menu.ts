@@ -26,6 +26,35 @@ export abstract class AbstractSettingsMenu {
   /** The main settings list (set after `create()` is called). */
   settingsList: SettingsList | null = null;
 
+  /** Maps submenu prefixes to their item property names. */
+  private readonly submenuKeys: Array<{
+    prefix: string;
+    itemProp: string;
+  }> = [
+    { prefix: "thresholds.", itemProp: "thresholdSubmenuItems" },
+    { prefix: "displayColors.", itemProp: "displayColorSubmenuItems" },
+    { prefix: "colors.", itemProp: "colorSubmenuItems" },
+  ];
+
+  /** Dispatches group-level id strings to their refresh methods. */
+  private readonly refreshHandlers: Record<string, () => void> = {
+    thresholds: () => this.refreshThresholdItems(),
+    colors: () => this.refreshColorItems(),
+    displayColors: () => this.refreshDisplayColorItems(),
+  };
+
+  /**
+   * Finds the submenu key entry matching an item id prefix.
+   *
+   * @param id The item id to match.
+   * @returns The matching submenu key, or null if none matches.
+   */
+  private findSubmenuKey(
+    id: string,
+  ): { prefix: string; itemProp: string } | null {
+    return this.submenuKeys.find((k) => id.startsWith(k.prefix)) ?? null;
+  }
+
   /**
    * Creates a resettable SettingsList for the main settings menu.
    *
@@ -78,16 +107,9 @@ export abstract class AbstractSettingsMenu {
     onReset: (id: string) => void,
     tui: TUI,
   ): SettingsList {
-    const isThresholds = items.some((i) => i.id.startsWith("thresholds."));
-    const isDisplayColors = items.some((i) =>
-      i.id.startsWith("displayColors."),
-    );
-    if (isThresholds) {
-      this.thresholdSubmenuItems = items;
-    } else if (isDisplayColors) {
-      this.displayColorSubmenuItems = items;
-    } else {
-      this.colorSubmenuItems = items;
+    const key = this.findSubmenuKey(items[0]?.id ?? "");
+    if (key) {
+      (this as Record<string, unknown>)[key.itemProp] = items;
     }
 
     const list = new ResettableSettingsList(
@@ -97,12 +119,8 @@ export abstract class AbstractSettingsMenu {
       onChange,
       () => {
         this.activeSubmenuList = null;
-        if (isThresholds) {
-          this.thresholdSubmenuItems = null;
-        } else if (isDisplayColors) {
-          this.displayColorSubmenuItems = null;
-        } else {
-          this.colorSubmenuItems = null;
+        if (key) {
+          (this as Record<string, unknown>)[key.itemProp] = null;
         }
         onDone();
       },
@@ -119,13 +137,8 @@ export abstract class AbstractSettingsMenu {
    * @param id The setting identifier that changed.
    */
   protected refreshListAfterChange(id: string): void {
-    if (id.startsWith("thresholds.") || id === "thresholds") {
-      this.refreshThresholdItems();
-    } else if (id.startsWith("colors.") || id === "colors") {
-      this.refreshColorItems();
-    } else if (id.startsWith("displayColors.") || id === "displayColors") {
-      this.refreshDisplayColorItems();
-    }
+    const group = id.includes(".") ? id.split(".")[0] : id;
+    this.refreshHandlers[group]?.();
   }
 
   // ── Template: change flow ─────────────────────────────────────────────
@@ -164,14 +177,10 @@ export abstract class AbstractSettingsMenu {
    * @param id The setting identifier.
    */
   protected async resetSetting(id: string): Promise<void> {
-    if (id === "thresholds" || id === "colors" || id === "displayColors") {
+    const isSubmenu = this.submenuKeys.some((k) => id.startsWith(k.prefix));
+    const isGroup = this.submenuKeys.some((k) => id === k.prefix.slice(0, -1));
+    if (isGroup) {
       await this.resetGroup(id);
-    } else if (
-      id.startsWith("thresholds.") ||
-      id.startsWith("colors.") ||
-      id.startsWith("displayColors.")
-    ) {
-      await this.resetScalar(id);
     } else {
       await this.resetScalar(id);
     }
