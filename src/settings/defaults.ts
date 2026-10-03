@@ -4,6 +4,7 @@ import { ColorsGroupSettingsItem } from "./items/colors/group";
 import { CountStrategySettingsItem } from "./items/count-strategy";
 import { DisplaySettingsItem } from "./items/display";
 import { EndTpsBehaviorSettingsItem } from "./items/end-tps-behavior";
+import { FormatDurationSettingsItem } from "./items/format-duration";
 import { IconSettingsItem } from "./items/icon";
 import { SlidingWindowSettingsItem } from "./items/sliding-window";
 import { THRESHOLD_ITEMS } from "./items/thresholds";
@@ -22,6 +23,7 @@ export const SETTINGS_ITEMS: Record<string, SettingsItem> = {
   countStrategy: new CountStrategySettingsItem(),
   slidingWindow: new SlidingWindowSettingsItem(),
   endTpsBehavior: new EndTpsBehaviorSettingsItem(),
+  formatDuration: new FormatDurationSettingsItem(),
   thresholds: new ThresholdsGroupSettingsItem(),
   colors: new ColorsGroupSettingsItem(),
 };

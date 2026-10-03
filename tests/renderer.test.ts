@@ -18,6 +18,7 @@ const makeConfig = (
   endTpsBehavior: "average",
   icon: "⚡",
   updateInterval: 0,
+  formatDuration: false,
   thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
   colors: {
     slow: "#ffcc00",
@@ -289,37 +290,87 @@ describe("Renderer", () => {
     });
   });
 
+  // ---- formatDuration ----
+
+  describe("formatDuration", () => {
+    it("shows plain seconds with one decimal below a minute", () => {
+      expect((renderer as any).formatDuration(45.67)).toBe("45.7s");
+      expect((renderer as any).formatDuration(0)).toBe("0.0s");
+      expect((renderer as any).formatDuration(59.9)).toBe("59.9s");
+    });
+
+    it("shows minutes plus seconds below an hour", () => {
+      expect((renderer as any).formatDuration(92.3)).toBe("1m 32.3s");
+      expect((renderer as any).formatDuration(3599)).toBe("59m 59.0s");
+    });
+
+    it("shows hours plus minutes below a day", () => {
+      expect((renderer as any).formatDuration(3600)).toBe("1h 0m");
+      expect((renderer as any).formatDuration(7325)).toBe("2h 2m");
+    });
+
+    it("shows days plus hours at a day or more", () => {
+      expect((renderer as any).formatDuration(86400)).toBe("1d 0h");
+      expect((renderer as any).formatDuration(3 * 86400 + 7 * 3600)).toBe(
+        "3d 7h",
+      );
+    });
+
+    it("never renders 60.0s by rounding into the next unit", () => {
+      // 59.96 rounds to 60.0 → becomes 1m 0.0s
+      expect((renderer as any).formatDuration(59.96)).toBe("1m 0.0s");
+      // 3599.97 rounds to 3600.0 → becomes 1h 0m
+      expect((renderer as any).formatDuration(3599.97)).toBe("1h 0m");
+    });
+
+    it("clamps invalid input to zero", () => {
+      expect((renderer as any).formatDuration(-5)).toBe("0.0s");
+      expect((renderer as any).formatDuration(Number.NaN)).toBe("0.0s");
+      expect((renderer as any).formatDuration(Number.POSITIVE_INFINITY)).toBe(
+        "0.0s",
+      );
+    });
+  });
+
   // ---- formatStats ----
 
   describe("formatStats", () => {
     it("shows tokens only when elapsed is zero", () => {
-      const result = (renderer as any).formatStats(100, 0);
+      const result = (renderer as any).formatStats(100, 0, {});
       expect(result).toBe("100 tok");
     });
 
     it("shows tokens and elapsed time", () => {
-      const result = (renderer as any).formatStats(100, 5.3);
+      const result = (renderer as any).formatStats(100, 5.3, {});
       expect(result).toBe("100 tok in 5.3s");
     });
 
     it("rounds elapsed to one decimal place", () => {
-      const result = (renderer as any).formatStats(100, 3.14159);
+      const result = (renderer as any).formatStats(100, 3.14159, {});
       expect(result).toBe("100 tok in 3.1s");
+    });
+
+    it("uses human-readable units when formatDuration is set", () => {
+      expect(
+        (renderer as any).formatStats(150, 92.34, { formatDuration: true }),
+      ).toBe("150 tok in 1m 32.3s");
     });
   });
 
   // ---- buildSuffix ----
 
   describe("buildSuffix", () => {
+    const opts = {};
+
     it('returns a zero-width space for "tps" mode', () => {
-      const suffix = (renderer as any).buildSuffix("tps");
+      const suffix = (renderer as any).buildSuffix("tps", opts);
       expect(suffix).toBe("\u200b");
     });
 
     it('includes TTFT for "ttft" mode', () => {
       engine["_ttftEnd"] = 500;
       engine["_ttftStart"] = 0;
-      const suffix = (renderer as any).buildSuffix("ttft");
+      const suffix = (renderer as any).buildSuffix("ttft", opts);
       expect(suffix).toContain("(TTFT: 500 ms)");
     });
 
@@ -327,7 +378,7 @@ describe("Renderer", () => {
       engine["_tokenCount"] = 200;
       engine["_startTime"] = Date.now() - 5000;
       engine["_endTime"] = Date.now();
-      const suffix = (renderer as any).buildSuffix("stats");
+      const suffix = (renderer as any).buildSuffix("stats", opts);
       expect(suffix).toContain("200 tok in");
       expect(suffix).toContain(".0s");
     });
@@ -338,7 +389,7 @@ describe("Renderer", () => {
       engine["_endTime"] = Date.now();
       engine["_ttftEnd"] = 300;
       engine["_ttftStart"] = 0;
-      const suffix = (renderer as any).buildSuffix("full");
+      const suffix = (renderer as any).buildSuffix("full", opts);
       expect(suffix).toContain("200 tok in");
       expect(suffix).toContain(".0s");
       expect(suffix).toContain("TTFT: 300 ms");

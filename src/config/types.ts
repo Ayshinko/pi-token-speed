@@ -40,6 +40,7 @@ interface TokenSpeedConfigFields {
   endTpsBehavior: EndTpsBehavior;
   icon: string;
   updateInterval: number; // ms, 0 = update on every delta
+  formatDuration: boolean;
   thresholds: Thresholds;
   colors: Colors;
 }
@@ -54,6 +55,7 @@ export type ProviderOverride = Partial<
 > & {
   thresholds?: Partial<Thresholds>;
   colors?: Partial<Colors>;
+  formatDuration?: boolean;
 };
 
 /**
@@ -83,5 +85,6 @@ export type PartialConfig = Partial<
 > & {
   thresholds?: Partial<Thresholds>;
   colors?: Partial<Colors>;
+  formatDuration?: boolean;
   providerOverrides?: ProviderOverrides;
 };

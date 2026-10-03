@@ -11,6 +11,7 @@ import {
 import { COUNT_STRATEGY_DEFAULT } from "../src/settings/items/count-strategy";
 import { DISPLAY_MODE_DEFAULT } from "../src/settings/items/display";
 import { END_TPS_BEHAVIOR_DEFAULT } from "../src/settings/items/end-tps-behavior";
+import { FORMAT_DURATION_DEFAULT } from "../src/settings/items/format-duration";
 import { DEFAULT_ICON } from "../src/settings/items/icon";
 import { SLIDING_WINDOW_DEFAULT } from "../src/settings/items/sliding-window";
 import {
@@ -32,6 +33,7 @@ const fakeConfig: TokenSpeedConfig = {
   endTpsBehavior: END_TPS_BEHAVIOR_DEFAULT,
   icon: DEFAULT_ICON,
   updateInterval: UPDATE_INTERVAL_DEFAULT,
+  formatDuration: FORMAT_DURATION_DEFAULT,
   thresholds: {
     slow: TPS_THRESHOLD_SLOW,
     medium: TPS_THRESHOLD_MEDIUM,

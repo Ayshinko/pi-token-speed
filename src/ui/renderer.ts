@@ -7,6 +7,14 @@ import { type DisplayMode } from "../settings/items/display";
 import { truecolor } from "./ansi";
 
 /**
+ * Options for rendering the stats suffix.
+ */
+interface StatsFormatOptions {
+  /** Show elapsed time in human-readable units. */
+  formatDuration?: boolean;
+}
+
+/**
  * Renderer for the token-speed status bar.
  */
 export class Renderer {
@@ -58,7 +66,9 @@ export class Renderer {
     const displayValue = truecolor(measurement, color);
 
     // Build the suffix based on display mode
-    const suffix = this.buildSuffix(config.display);
+    const suffix = this.buildSuffix(config.display, {
+      formatDuration: config.formatDuration,
+    });
 
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
@@ -84,38 +94,99 @@ export class Renderer {
   }
 
   /**
-   * Formats the stats portion: "<x> tok in <y>s".
+   * Formats elapsed seconds into human-readable units.
+   *
+   * Pure formatting: number in → string out. Knows nothing about the
+   * `formatDuration` toggle or colors — the caller decides whether to use it
+   * and may wrap its output (e.g. with `truecolor()` for display colors).
+   *
+   * Rules:
+   * - < 1min: seconds with 0.1s precision  (0.0s, 0.5s, 45.7s)
+   * - 1min–1h: minutes (int) + seconds (0.1s)  (1m 0.0s, 1m 32.3s)
+   * - 1h–1d: hours (int) + minutes (int)  (1h 0m, 2h 5m)
+   * - ≥ 1d: days (int) + hours (int)  (1d 0h, 3d 7h)
+   * - All components shown down to the smallest unit (trailing zeroes allowed)
+   */
+  private formatDuration(seconds: number): string {
+    // Clamp invalid input (negative, NaN, Infinity) to zero
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+
+    const totalTenths = Math.round(seconds * 10); // tenths of a second
+
+    if (totalTenths === 0) return "0.0s";
+
+    const days = Math.floor(totalTenths / 864000);
+    const remaining = totalTenths % 864000;
+    const hours = Math.floor(remaining / 36000);
+    const remaining2 = remaining % 36000;
+    const minutes = Math.floor(remaining2 / 600);
+    const secs = (remaining2 % 600) / 10;
+
+    if (totalTenths >= 864000) {
+      // >= 1 day
+      return `${days}d ${hours}h`;
+    }
+    if (totalTenths >= 36000) {
+      // >= 1 hour
+      return `${hours}h ${minutes}m`;
+    }
+    if (totalTenths >= 600) {
+      // >= 1 minute
+      return `${minutes}m ${secs.toFixed(1)}s`;
+    }
+    // < 1 minute
+    return `${secs.toFixed(1)}s`;
+  }
+
+  /**
+   * Formats the stats portion: "<x> tok in <y>s" (or human-readable units).
    *
    * @param tokenCount The number of tokens
    * @param elapsedSeconds The elapsed time in seconds
+   * @param opts Formatting options (formatDuration, displayColors).
    * @returns The formatted stats string.
    */
-  private formatStats(tokenCount: number, elapsedSeconds: number): string {
+  private formatStats(
+    tokenCount: number,
+    elapsedSeconds: number,
+    opts: StatsFormatOptions,
+  ): string {
     if (elapsedSeconds <= 0) return `${tokenCount} tok`;
-    return `${tokenCount} tok in ${elapsedSeconds.toFixed(1)}s`;
+
+    const elapsed = opts.formatDuration
+      ? this.formatDuration(elapsedSeconds)
+      : `${elapsedSeconds.toFixed(1)}s`;
+
+    return `${tokenCount} tok in ${elapsed}`;
   }
 
   private readonly RENDER_SUFFIXES: Record<
     DisplayMode,
-    (ttft: number, tokens: number, elapsed: number) => string
+    (
+      ttft: number,
+      tokens: number,
+      elapsed: number,
+      opts: StatsFormatOptions,
+    ) => string
   > = {
     tps: () => "\u200b",
     ttft: (ttft) => ` (TTFT: ${ttft} ms)\u200b`,
-    stats: (_, tokens, elapsed) =>
-      ` (${this.formatStats(tokens, elapsed)})\u200b`,
-    full: (ttft, tokens, elapsed) =>
-      ` (${this.formatStats(tokens, elapsed)} · TTFT: ${ttft} ms)\u200b`,
+    stats: (_, tokens, elapsed, opts) =>
+      ` (${this.formatStats(tokens, elapsed, opts)})\u200b`,
+    full: (ttft, tokens, elapsed, opts) =>
+      ` (${this.formatStats(tokens, elapsed, opts)} · TTFT: ${ttft} ms)\u200b`,
   };
 
   /**
    * Builds a suffix for the status bar after the TPS measurement.
    *
    * @param display Display mode to check against
+   * @param opts Formatting options for the stats portion.
    * @returns The suffix to append
    */
-  private buildSuffix(display: DisplayMode): string {
+  private buildSuffix(display: DisplayMode, opts: StatsFormatOptions): string {
     const { ttft, tokenCount: tokens, elapsedSeconds: elapsed } = this.engine;
-    return this.RENDER_SUFFIXES[display](ttft, tokens, elapsed);
+    return this.RENDER_SUFFIXES[display](ttft, tokens, elapsed, opts);
   }
 
   /**

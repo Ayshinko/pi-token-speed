@@ -61,7 +61,8 @@ You can customize the display, speed thresholds and colors by adding a `tokenSpe
     "endTpsBehavior": "average",
     "icon": "⚡",
     "slidingWindow": 1000,
-    "updateInterval": 0
+    "updateInterval": 0,
+    "formatDuration": false
   }
 }
 ```
@@ -116,24 +117,25 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 
 ### Configuration Options
 
-| Option               | Type                           | Default     | Description                                                                   |
-| -------------------- | ------------------------------ | ----------- | ----------------------------------------------------------------------------- |
-| `thresholds.slow`    | number                         | `0`         | Minimum TPS threshold ("slow")                                                |
-| `thresholds.medium`  | number                         | `15`        | TPS above this is "medium"                                                    |
-| `thresholds.fast`    | number                         | `30`        | TPS above this is "fast"                                                      |
-| `thresholds.blazing` | number                         | `45`        | TPS above this is "blazing"                                                   |
-| `colors.slow`        | string                         | `"#ff4444"` | Color for slow tier                                                           |
-| `colors.medium`      | string                         | `"#ffaa00"` | Color for medium tier                                                         |
-| `colors.fast`        | string                         | `"#00ff88"` | Color for fast tier                                                           |
-| `colors.blazing`     | string                         | `"#44ddff"` | Color for blazing tier                                                        |
-| `slidingWindow`      | number                         | `1000`      | Sliding window duration in ms                                                 |
-| `display`            | `tps`, `ttft`, `stats`, `full` | `tps`       | Display mode (see [Display Modes](#display-modes))                            |
-| `useProviderTokens`  | boolean                        | `false`     | Opt-in: use provider-reported count instead of the extension one              |
-| `countStrategy`      | `estimate`, `direct`           | `direct`    | Token counting strategy used by the extension's own counter                   |
-| `endTpsBehavior`     | `average`, `last`              | `average`   | What to show after streaming ends                                             |
-| `icon`               | string                         | `"⚡"`      | Icon shown before TPS in the status bar                                       |
-| `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                            |
-| `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides)) |
+| Option               | Type                           | Default     | Description                                                                                 |
+| -------------------- | ------------------------------ | ----------- | ------------------------------------------------------------------------------------------- |
+| `thresholds.slow`    | number                         | `0`         | Minimum TPS threshold ("slow")                                                              |
+| `thresholds.medium`  | number                         | `15`        | TPS above this is "medium"                                                                  |
+| `thresholds.fast`    | number                         | `30`        | TPS above this is "fast"                                                                    |
+| `thresholds.blazing` | number                         | `45`        | TPS above this is "blazing"                                                                 |
+| `colors.slow`        | string                         | `"#ff4444"` | Color for slow tier                                                                         |
+| `colors.medium`      | string                         | `"#ffaa00"` | Color for medium tier                                                                       |
+| `colors.fast`        | string                         | `"#00ff88"` | Color for fast tier                                                                         |
+| `colors.blazing`     | string                         | `"#44ddff"` | Color for blazing tier                                                                      |
+| `slidingWindow`      | number                         | `1000`      | Sliding window duration in ms                                                               |
+| `display`            | `tps`, `ttft`, `stats`, `full` | `tps`       | Display mode (see [Display Modes](#display-modes))                                          |
+| `useProviderTokens`  | boolean                        | `false`     | Opt-in: use provider-reported count instead of the extension one                            |
+| `countStrategy`      | `estimate`, `direct`           | `direct`    | Token counting strategy used by the extension's own counter                                 |
+| `endTpsBehavior`     | `average`, `last`              | `average`   | What to show after streaming ends                                                           |
+| `icon`               | string                         | `"⚡"`      | Icon shown before TPS in the status bar                                                     |
+| `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                                          |
+| `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting)) |
+| `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))               |
 
 ### Interactive Menu
 
@@ -146,6 +148,7 @@ A small interactive menu is available when running `/tps` in the editor, where y
 - **Count strategy** — how the extension counts tokens (`estimate` or `direct`)
 - **Sliding window** — time window for TPS calculation (see [Sliding Window](#sliding-window))
 - **End-of-stream TPS** — what to show after streaming ends (`average` or `last`)
+- **Format duration** — show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))
 - **Thresholds** — customize the TPS threshold values for each tier (see [Threshold Customization](#threshold-customization))
 - **Colors** — customize the hex color for each TPS tier (see [Color Customization](#color-customization))
 
@@ -277,6 +280,27 @@ You can also set a custom value in `~/.pi/agent/settings.json`:
 ```
 
 The TPS calculation continues normally regardless of the update interval — only the status bar rendering is throttled.
+
+### Duration Formatting
+
+When `formatDuration` is enabled, elapsed time in the stats display is formatted into the largest sensible units:
+
+| Elapsed | Without `formatDuration` | With `formatDuration` |
+| ------- | ------------------------ | --------------------- |
+| 45.67s  | `45.7s`                  | `45.7s`               |
+| 92.34s  | `92.3s`                  | `1m 32.3s`            |
+| 7325s   | `7325.0s`                | `2h 2m`               |
+| 3d 7h   | `286940.0s`              | `3d 7h`               |
+| 0s      | `0.0s`                   | `0.0s`                |
+
+**Formatting rules**:
+
+- `< 1min` → seconds with 0.1s precision (`0.0s`, `0.5s`, `45.7s`)
+- `1min – 1h` → minutes (int) + seconds at 0.1s (`1m 0.0s`, `1m 32.3s`)
+- `1h – 1d` → hours (int) + minutes (int) (`1h 0m`, `2h 5m`)
+- `≥ 1d` → days (int) + hours (int) (`1d 0h`, `3d 7h`)
+- All components down to the smallest unit are shown (trailing zeroes allowed)
+- Sub-second values show as-is with 0.1s precision (`0.0s`, `0.5s`)
 
 ## Display Modes
 
