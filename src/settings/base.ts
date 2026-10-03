@@ -82,7 +82,7 @@ export abstract class SettingsItem {
    * @param value The raw config value to validate.
    * @returns Whether the value is valid and the corrected value (if invalid).
    */
-  validate(value: unknown): ValidationCheckResult {
+  validate(_value: unknown): ValidationCheckResult {
     // Default: no-op for group items. Concrete items override.
     return { valid: true };
   }
