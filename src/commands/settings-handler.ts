@@ -41,6 +41,7 @@ export class SettingsHandler extends BaseMenuHandler {
         this.engine.initialize();
         this.renderer.update(ctx);
       },
+      onWarning: (message) => ctx.ui.notify(message, "warning"),
     });
 
     return {

@@ -20,6 +20,7 @@ import { SettingsListRefresher } from "./settings-list-refresher";
 export interface SettingsMenuOptions {
   config: TokenSpeedConfig;
   onSettingChange: () => void; // callback for re-apply engine + renderer
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -85,7 +86,10 @@ export class SettingsMenu extends AbstractSettingsMenu {
     if (!item) return false;
     const result = item.setConfig(config, value);
     if (!result.valid) {
-      return false; // No notification — pure UI, no ctx
+      this.opts.onWarning?.(
+        `[pi-token-speed] ${result.errors?.join("\n") ?? "Invalid value."}`,
+      );
+      return false;
     }
     await settings.setConfig(result.config!);
     return true;

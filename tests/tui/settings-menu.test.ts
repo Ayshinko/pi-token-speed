@@ -313,6 +313,40 @@ describe("SettingsMenu", () => {
 
       expect(onSettingChange).not.toHaveBeenCalled();
     });
+
+    it("warns when a threshold breaks ascending order", async () => {
+      const onSettingChange = vi.fn();
+      const onWarning = vi.fn();
+      const menu2 = new SettingsMenu({
+        config: settings.getConfig(),
+        onSettingChange,
+        onWarning,
+      });
+
+      // Default config has fast=60; medium=50 is fine... use 70 instead
+      // (greater than fast), which must be rejected with a warning.
+      await (menu2 as any).handleSettingChange("thresholds.medium", "70");
+
+      expect(onWarning).toHaveBeenCalled();
+      const message = onWarning.mock.calls[0][0] as string;
+      expect(message).toContain("ascending");
+      expect(onSettingChange).not.toHaveBeenCalled();
+    });
+
+    it("does not warn on a valid threshold change", async () => {
+      const onSettingChange = vi.fn();
+      const onWarning = vi.fn();
+      const menu2 = new SettingsMenu({
+        config: settings.getConfig(),
+        onSettingChange,
+        onWarning,
+      });
+
+      await (menu2 as any).handleSettingChange("thresholds.medium", "40");
+
+      expect(onWarning).not.toHaveBeenCalled();
+      expect(onSettingChange).toHaveBeenCalled();
+    });
   });
 
   // ── refreshThresholdItems ────────────────────────────────────────────

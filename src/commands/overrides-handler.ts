@@ -44,7 +44,7 @@ export class OverridesHandler extends BaseMenuHandler {
         this.engine.applyProvider(ctx.model?.provider);
         this.renderer.update(ctx);
       },
-      onError: (message) => ctx.ui.notify(message, "error"),
+      onWarning: (message) => ctx.ui.notify(message, "error"),
     });
 
     return {

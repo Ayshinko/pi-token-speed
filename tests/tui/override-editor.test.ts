@@ -85,7 +85,7 @@ function makeHarness(initial: ProviderOverrides = {}) {
     overrides,
     persist,
     onSettingChange: vi.fn(),
-    onError: vi.fn(),
+    onWarning: vi.fn(),
   });
   const tui = makeTui();
   const theme = makeTheme();

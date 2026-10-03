@@ -22,8 +22,7 @@ export interface OverrideSettingsMenuOptions {
   overrides: ProviderOverrides;
   persist: (next: ProviderOverrides) => Promise<void>;
   onSettingChange: () => void;
-  /** Optional sink for persistence errors (e.g. `ctx.ui.notify`). */
-  onError?: (message: string) => void;
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -145,7 +144,7 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
       providerId,
       overrides: this.opts.overrides,
       persist: this.opts.persist,
-      onWarning: () => {}, // No ctx for notifications
+      onWarning: (message) => this.opts.onWarning?.(message),
       onBlockChanged: () => {
         this.settingsList?.updateValue(
           providerId,
@@ -283,7 +282,7 @@ export class OverrideSettingsMenu extends AbstractSettingsMenu {
     try {
       await this.opts.persist(next);
     } catch (err) {
-      this.opts.onError?.(String(err));
+      this.opts.onWarning?.(String(err));
       return false;
     }
     for (const key of Object.keys(this.opts.overrides)) {
