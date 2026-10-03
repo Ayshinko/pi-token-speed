@@ -6,7 +6,7 @@ import type {
 } from "../../config/types";
 import { SETTINGS_ITEMS } from "../../settings/defaults";
 import { TIERS } from "../../settings/options";
-import { getGroupPrefix } from "../../settings/utils";
+import { getGroupPrefix, isScalarField } from "../../settings/utils";
 import { truecolor } from "../ansi";
 
 /** Label shown for fields not set in the override block. */
@@ -16,7 +16,10 @@ export const BASE = "(base)";
  * Computes the currentValue shown for a block field row.
  */
 export function fieldValue(id: string, block: ProviderOverride): string {
-  const item = SETTINGS_ITEMS[id];
+  // Group ids ("thresholds", "colors", "displayColors") are registered in
+  // SETTINGS_ITEMS as group entries whose format() is undefined; resolve
+  // them (and their children) by prefix before the scalar lookup.
+  const item = isScalarField(id) ? SETTINGS_ITEMS[id] : undefined;
   if (item) {
     return id in block
       ? (item.formatPartial(block, settings.getConfig()) ?? BASE)
