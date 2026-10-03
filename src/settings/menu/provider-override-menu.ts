@@ -14,7 +14,8 @@ import type {
 } from "../../config/types";
 import { truecolor } from "../../ui/ansi";
 import { OverrideTierSubmenuBuilder } from "../../ui/color-picker";
-import { BASE, computeNextBlock, fieldValue } from "../../ui/editor/utils";
+import { computeNextBlock } from "../../ui/editor/block-updaters";
+import { BASE, fieldValue } from "../../ui/editor/utils";
 import { SETTINGS_ITEMS } from "../defaults";
 import { TIERS } from "../options";
 import { AbstractSettingsMenu } from "./abstract-settings-menu";
