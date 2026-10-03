@@ -40,16 +40,6 @@ export class ThresholdsGroupSettingsItem extends SettingsItem {
   }
 
   /**
-   * Returns a partial config resetting all threshold tiers to their defaults.
-   *
-   * @param _defaults The default configuration.
-   * @returns A partial config with the thresholds group reset.
-   */
-  reset(_defaults: TokenSpeedConfig): Partial<TokenSpeedConfig> {
-    return { thresholds: { ..._defaults.thresholds } };
-  }
-
-  /**
    * Composite validation: checks each tier and ordering.
    *
    * @param value The thresholds object to validate.

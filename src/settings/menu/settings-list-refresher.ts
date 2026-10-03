@@ -66,7 +66,7 @@ export class SettingsListRefresher {
   refreshColors(): void {
     const colors = this.source.getColors();
 
-    if (!this.menu.thresholdSubmenuItems && this.menu.colorSubmenuItems) {
+    if (this.menu.colorSubmenuItems) {
       for (const { key, label } of TIERS) {
         const item = this.menu.colorSubmenuItems.find(
           (i) => i.id === `colors.${key}`,

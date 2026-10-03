@@ -156,16 +156,6 @@ export abstract class ScalarSettingsItem<T> extends SettingsItem {
   }
 
   /**
-   * Resets this setting to its default value.
-   *
-   * @param _defaults The default config (unused).
-   * @returns A partial config with the default value for this setting.
-   */
-  reset(_defaults: TokenSpeedConfig): Partial<TokenSpeedConfig> {
-    return { [this.options.id]: this.options.default };
-  }
-
-  /**
    * Validates a raw value and returns a corrected version if invalid.
    *
    * @param value The value to validate.

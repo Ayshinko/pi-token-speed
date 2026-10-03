@@ -92,11 +92,6 @@ export abstract class SettingsItem {
   }
 
   /**
-   * Returns a partial config resetting this setting to its default.
-   */
-  abstract reset(defaults: TokenSpeedConfig): Partial<TokenSpeedConfig>;
-
-  /**
    * Formats the value from a partial override, merging with defaults
    * for any missing fields so `format` can read them.
    */

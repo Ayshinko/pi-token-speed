@@ -37,11 +37,11 @@ export class SettingsMenu extends AbstractSettingsMenu {
   }
 
   getThresholds(): Thresholds {
-    return this.opts.config.thresholds;
+    return settings.getConfig().thresholds;
   }
 
   getColors(): Colors {
-    return this.opts.config.colors;
+    return settings.getConfig().colors;
   }
 
   /**
@@ -102,18 +102,16 @@ export class SettingsMenu extends AbstractSettingsMenu {
   }
 
   /**
-   * Resets a single (scalar or per-tier) setting to its default value
-   * and reflects the new value in the main menu's row.
+   * Resets a single (scalar or per-tier) setting by deleting its key
+   * from the persisted config (so it falls back to the default) and
+   * reflects the reset value in the main menu's row.
    *
    * @param id The setting identifier.
    */
   protected override async resetScalar(id: string): Promise<void> {
     const item = SETTINGS_ITEMS[id] ?? TIER_SETTINGS_ITEMS[id];
     if (!item) return;
-    const partial = item.reset(settings.getDefaultConfig());
-    if (Object.keys(partial).length > 0) {
-      await settings.setConfig(partial);
-    }
+    await settings.resetKeys([id]);
 
     // Reflect the reset value in the main menu's row
     const mainValue = item.format(settings.getConfig());
@@ -123,17 +121,16 @@ export class SettingsMenu extends AbstractSettingsMenu {
   }
 
   /**
-   * Resets a grouped setting (thresholds or colors) to its defaults.
+   * Resets a grouped setting (thresholds or colors) by deleting the
+   * group key from the persisted config (so all tiers fall back to
+   * their defaults).
    *
    * @param id The group identifier ("thresholds" or "colors").
    */
   protected override async resetGroup(id: string): Promise<void> {
     const item = SETTINGS_ITEMS[id];
     if (!item) return;
-    const partial = item.reset(settings.getDefaultConfig());
-    if (Object.keys(partial).length > 0) {
-      await settings.setConfig(partial);
-    }
+    await settings.resetKeys([id]);
   }
 
   /**
@@ -237,6 +234,7 @@ export class SettingsMenu extends AbstractSettingsMenu {
 
     if (this.settingsList) {
       this.settingsList.updateValue("thresholds", allThresholds);
+      this.settingsList.invalidate();
     }
 
     this.refresher.refreshThresholds();
@@ -254,6 +252,7 @@ export class SettingsMenu extends AbstractSettingsMenu {
         "colors",
         TIERS.map(({ key }) => truecolor("■", config.colors[key])).join(" "),
       );
+      this.settingsList.invalidate();
     }
 
     this.refresher.refreshColors();

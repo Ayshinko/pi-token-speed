@@ -29,8 +29,14 @@ export class InputDialog extends BaseDialog implements Component {
     for (let i = 0; i < [...initial].length; i++) {
       this.input.handleInput("\x1b[C");
     }
-    this.input.onSubmit = (value) => this.submit(value);
-    this.input.onEscape = () => options.onCancel();
+    this.input.onSubmit = (value) => {
+      this.submit(value);
+      this.tui.requestRender();
+    };
+    this.input.onEscape = () => {
+      options.onCancel();
+      this.tui.requestRender();
+    };
 
     this.body.addChild(new Text(this.theme.fg("text", options.message), 1, 0));
     if (options.placeholder) {

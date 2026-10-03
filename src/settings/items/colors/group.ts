@@ -38,16 +38,6 @@ export class ColorsGroupSettingsItem extends SettingsItem {
   }
 
   /**
-   * Returns a partial config resetting all color tiers to their defaults.
-   *
-   * @param _defaults The default configuration.
-   * @returns A partial config with the colors group reset.
-   */
-  reset(_defaults: TokenSpeedConfig): Partial<TokenSpeedConfig> {
-    return { colors: { ..._defaults.colors } };
-  }
-
-  /**
    * Composite validation: checks each tier's hex validity.
    *
    * @param value The colors object to validate.

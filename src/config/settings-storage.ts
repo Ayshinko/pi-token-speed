@@ -98,6 +98,54 @@ export class SettingsStorage {
   }
 
   /**
+   * Deletes keys from the raw "tokenSpeed" block in the settings file.
+   *
+   * Supports dotted keys to remove a single tier from a nested group
+   * (e.g. "thresholds.slow"); when the nested group becomes empty it is
+   * removed entirely. Plain keys (e.g. "display", "thresholds") are
+   * removed as-is, and the "tokenSpeed" block itself is dropped when
+   * nothing remains.
+   *
+   * @param keys The keys to delete from the tokenSpeed block.
+   */
+  async deleteTokenSpeedKeys(keys: string[]): Promise<void> {
+    const settings = await this.read();
+    const block =
+      this.readNestedGroup<Record<string, unknown>>(settings, "tokenSpeed") ||
+      {};
+
+    for (const key of keys) {
+      const dot = key.indexOf(".");
+      if (dot === -1) {
+        delete block[key];
+        continue;
+      }
+      const group = key.slice(0, dot);
+      const tier = key.slice(dot + 1);
+      // readNestedGroup returns the live nested object, so mutating it
+      // updates the block in place; a fresh {} means the group was absent.
+      const nested = this.readNestedGroup<Record<string, unknown>>(
+        block,
+        group,
+      );
+      if (tier in nested) {
+        delete nested[tier];
+        if (Object.keys(nested).length === 0) {
+          delete block[group];
+        }
+      }
+    }
+
+    if (Object.keys(block).length > 0) {
+      settings["tokenSpeed"] = block;
+    } else {
+      delete settings["tokenSpeed"];
+    }
+
+    await this.write(settings);
+  }
+
+  /**
    * Safely reads a nested object group from a raw block.
    *
    * @param block The raw settings block to read from.

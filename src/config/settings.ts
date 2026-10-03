@@ -167,6 +167,19 @@ class Settings {
     const current = this.cachedConfig || this.getDefaultConfig();
     this.cachedConfig = mergeConfig(current, partial) as TokenSpeedConfig;
   }
+
+  /**
+   * Deletes keys from the persisted "tokenSpeed" block and refreshes the
+   * cache by re-initializing from disk. Deleted keys fall back to their
+   * defaults, so resets remove the keys instead of writing default values.
+   *
+   * @param keys The keys to delete (dotted keys delete a single tier
+   *   from a nested group, e.g. "thresholds.slow").
+   */
+  async resetKeys(keys: string[]): Promise<void> {
+    await this.storage.deleteTokenSpeedKeys(keys);
+    await this.initialize();
+  }
 }
 
 /**
