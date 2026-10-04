@@ -554,3 +554,62 @@ describe("Renderer", () => {
     });
   });
 });
+describe("Renderer task durations", () => {
+  let ctx: ExtensionContext;
+
+  beforeEach(() => {
+    configRef.current = makeConfig({
+      endTpsBehavior: "last",
+      colors: { slow: "", medium: "", fast: "", blazing: "" },
+    });
+    ctx = makeContext();
+  });
+
+  it("appends Gen and Total to the completed native status", () => {
+    const engine = makeEngine();
+    Object.assign(engine, { _taskStart: 1000, _taskEnd: 73000 });
+    Object.assign(engine, {
+      _native: {
+        current: {
+          liveTps: 34.1,
+          meanTps: 34.1,
+          prefillTps: 0,
+          outputTokens: 1248,
+          decodeSeconds: 36.6,
+          completed: true,
+        },
+      },
+    });
+    const renderer = new Renderer(engine);
+    const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+    renderer.update(ctx);
+    expect(setStatusSpy).toHaveBeenCalled();
+    expect(setStatusSpy.mock.calls[0][1]).toBe(
+      "⚡ Mean 34.1 tok/s · 1248 tok · Gen 36.6s · Total 1m12s\u200b",
+    );
+  });
+
+  it("appends Total to the finished cloud status", () => {
+    const engine = makeEngine();
+    Object.assign(engine, { _taskStart: 100, _taskEnd: 18500, _tps: 91.2 });
+    engine.stop(); // render after agent_end: the stream has ended
+    const renderer = new Renderer(engine);
+    const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+    renderer.update(ctx);
+    expect(setStatusSpy).toHaveBeenCalled();
+    expect(setStatusSpy.mock.calls[0][1]).toBe(
+      "⚡ TPS: 91.2 tok/s · Total 18.4s\u200b",
+    );
+  });
+
+  it("does not append Total while the stream is live", () => {
+    const engine = makeEngine();
+    Object.assign(engine, { _taskStart: 100, _tps: 45.2 });
+    const renderer = new Renderer(engine);
+    const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+    renderer.update(ctx);
+    const status = setStatusSpy.mock.calls[0][1] as string;
+    expect(status).toContain("45.2 tok/s");
+    expect(status).not.toContain("Total");
+  });
+});

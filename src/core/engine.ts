@@ -44,6 +44,14 @@ export class TokenSpeedEngine {
    * no adapter configured, which keeps the counter-only path intact.
    */
   private _native: StrataMetricsPoller | null = null;
+  /**
+   * Whole-task wall-clock timer (monotonic, immune to clock changes).
+   * `_taskStart` is set when a user message starts; `_taskEnd` freezes
+   * the timer at agent_end. Distinct from the stream timer, so tool
+   * calls and multiple model turns all count toward Total.
+   */
+  private _taskStart = 0;
+  private _taskEnd = 0;
 
   constructor() {
     this._slidingWindow = new SlidingWindow(SLIDING_WINDOW_DEFAULT);
@@ -204,6 +212,18 @@ export class TokenSpeedEngine {
   }
 
   /**
+   * Arms the native metrics adapter for the request that is about to run.
+   *
+   * Called when a user message starts, i.e. before model inference, so the
+   * adapter can observe the server's prompt-processing phase and capture a
+   * request baseline before this request finishes. No-op (and never polls)
+   * when the active provider has no adapter configured.
+   */
+  startNativeMetrics(): void {
+    this._native?.start();
+  }
+
+  /**
    * Server-native metrics snapshot for the current request, or null when the
    * provider has no adapter or the endpoint produced nothing usable.
    */
@@ -214,6 +234,45 @@ export class TokenSpeedEngine {
   /** Whether the active provider has a native metrics adapter configured. */
   get hasNativeMetrics(): boolean {
     return this._native !== null;
+  }
+
+  /**
+   * Begins timing a new Pi task (reset on each user message).
+   *
+   * Uses `performance.now()` (monotonic) so system clock changes cannot
+   * corrupt the measurement. The timer intentionally survives assistant
+   * streams, tool calls, and model turns — only a new user message or
+   * session shutdown clears it.
+   */
+  startTask(): void {
+    this._taskStart = performance.now();
+    this._taskEnd = 0;
+  }
+
+  /**
+   * Freezes the task timer (called at agent_end) so the final status
+   * shows the total task duration. Idempotent: the first call wins.
+   */
+  finishTask(): void {
+    if (this._taskStart === 0) return;
+    if (this._taskEnd === 0) this._taskEnd = performance.now();
+  }
+
+  /** Clears task timer state (session shutdown). */
+  clearTask(): void {
+    this._taskStart = 0;
+    this._taskEnd = 0;
+  }
+
+  /**
+   * Total elapsed seconds of the current Pi task since the user's
+   * message. Continues growing while the task is active; frozen after
+   * agent_end; 0 before any user message.
+   */
+  get taskElapsedSeconds(): number {
+    if (this._taskStart === 0) return 0;
+    const end = this._taskEnd > 0 ? this._taskEnd : performance.now();
+    return (end - this._taskStart) / 1000;
   }
 
   /**
@@ -238,7 +297,9 @@ export class TokenSpeedEngine {
     this._tps = 0;
     this._pausedMs = 0;
 
-    this._native?.start();
+    // The adapter is already armed (at user-message start) so it can
+    // observe the prefill phase; starting the stream must not reset it.
+    this._native?.ensureRunning();
   }
 
   /**

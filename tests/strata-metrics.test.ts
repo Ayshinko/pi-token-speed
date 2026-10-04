@@ -319,13 +319,31 @@ describe("StrataMetricsPoller", () => {
     expect(calls).toBe(after);
   });
 
-  it("trailing slashes in the url are normalised", () => {
+  it("ensureRunning() keeps an armed poller's baseline and snapshot", async () => {
+    const payloads = [completedPayload([7]), livePayload()];
+    let step = 0;
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      json: async () => payloads[Math.min(step++, payloads.length - 1)],
+    }));
     const poller = new StrataMetricsPoller({
-      url: "http://127.0.0.1:8080/metrics/",
+      url: "http://x/metrics",
+      intervalMs: 20,
     });
-    expect((poller as unknown as { url: string }).url).toBe(
-      "http://127.0.0.1:8080/metrics",
-    );
+    poller.start();
+    await sleep(60);
+    expect(
+      (poller as unknown as { baselineRequestTime: number })
+        .baselineRequestTime,
+    ).toBe(7);
+    expect(poller.current?.liveTps).toBe(68.4);
+    poller.ensureRunning();
+    expect(
+      (poller as unknown as { baselineRequestTime: number })
+        .baselineRequestTime,
+    ).toBe(7);
+    expect(poller.current?.liveTps).toBe(68.4);
+    poller.stop();
   });
 });
 
@@ -385,6 +403,99 @@ describe("TokenSpeedEngine native metrics integration", () => {
     const engine = engineWith();
     await engine.finalizeNativeMetrics();
     expect(engine.nativeSnapshot).toBeNull();
+  });
+
+  it("startNativeMetrics() observes the prefill phase before the stream starts", async () => {
+    stubFetch(livePayload({ state: "reading", prefill_tok_s_mean: 2720 }));
+    const engine = engineWith({ url: "http://x/metrics", intervalMs: 30 });
+    engine.startNativeMetrics();
+    await sleep(80);
+    expect(engine.nativeSnapshot?.prefillTps).toBe(2720);
+    expect(engine.nativeSnapshot?.completed).toBe(false);
+    engine.stop();
+  });
+
+  it("stream start does not reset the armed adapter or its latched prefill", async () => {
+    let phase: "reading" | "generating" = "reading";
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      json: async () =>
+        livePayload({
+          state: phase,
+          prefill_tok_s_mean: phase === "reading" ? 2720 : 0,
+        }),
+    }));
+    const engine = engineWith({ url: "http://x/metrics", intervalMs: 20 });
+    engine.startNativeMetrics();
+    await sleep(60);
+    expect(engine.nativeSnapshot?.prefillTps).toBe(2720);
+    phase = "generating"; // Strata zeroes prefill once decoding starts
+    engine.start(); // assistant stream begins
+    await sleep(60);
+    expect(engine.nativeSnapshot?.prefillTps).toBe(2720); // still latched
+    expect(engine.nativeSnapshot?.liveTps).toBe(68.4);
+    engine.stop();
+  });
+
+  it("recognizes a short request that completes before the first assistant poll", async () => {
+    // The first poll (at user-message start) already sees the finished
+    // request, so the baseline is taken too late and would hide its record.
+    const payload = completedPayload([200, 100]);
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      json: async () => payload,
+    }));
+    const engine = engineWith({ url: "http://x/metrics", intervalMs: 30 });
+    engine.startNativeMetrics();
+    await sleep(50);
+    engine.start(); // must not disturb the baseline
+    await engine.finalizeNativeMetrics();
+    expect(engine.nativeSnapshot?.completed).toBe(true);
+    expect(engine.nativeSnapshot?.outputTokens).toBe(1248);
+  });
+
+  it("does not leak a previous request into the final snapshot", async () => {
+    const prevPayload = {
+      requests: [
+        { time: 100, output_tokens: 999, decode_tok_s: 10, decode_ms: 10000 },
+      ],
+    };
+    const currentPayload = {
+      requests: [
+        {
+          time: 200,
+          output_tokens: 1248,
+          decode_tok_s: 64.7,
+          decode_ms: 19300,
+        },
+        { time: 100, output_tokens: 999, decode_tok_s: 10, decode_ms: 10000 },
+      ],
+    };
+    const payloads = [prevPayload, livePayload(), currentPayload];
+    let step = 0;
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      json: async () => payloads[Math.min(step++, payloads.length - 1)],
+    }));
+    const engine = engineWith({ url: "http://x/metrics", intervalMs: 20 });
+    engine.startNativeMetrics();
+    await sleep(80);
+    await engine.finalizeNativeMetrics();
+    expect(engine.nativeSnapshot?.completed).toBe(true);
+    expect(engine.nativeSnapshot?.outputTokens).toBe(1248);
+  });
+
+  it("never polls for providers without nativeMetrics", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      return { ok: true, json: async () => livePayload() };
+    });
+    const engine = engineWith();
+    engine.startNativeMetrics();
+    engine.start();
+    await sleep(60);
+    expect(calls).toBe(0);
   });
 });
 
@@ -451,7 +562,7 @@ describe("Renderer native path", () => {
     });
     renderer.update(ctx);
     expect(setStatus.mock.calls[0][1]).toBe(
-      "⚡ Mean 64.7 tok/s · 1248 tok · 19.3s​",
+      "⚡ Mean 64.7 tok/s · 1248 tok · Gen 19.3s​",
     );
   });
 

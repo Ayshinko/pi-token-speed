@@ -8,6 +8,30 @@ import type { NativeMetricsSnapshot } from "../native/strata-metrics";
 import { truecolor } from "./ansi";
 
 /**
+ * Formats a duration for the Gen/Total summary.
+ *
+ * Rules (no milliseconds):
+ * - < 60s: seconds with one decimal (36.6s, 42.3s)
+ * - 1m–1h: compact minutes + seconds (1m12s)
+ * - >= 1h: compact hours + minutes (1h03m)
+ */
+export function formatTaskDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+
+  const totalSec = Math.round(seconds);
+  if (totalSec < 3600) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}m${String(s).padStart(2, "0")}s`;
+  }
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  return `${h}h${String(m).padStart(2, "0")}m`;
+}
+
+/**
  * Options for rendering the stats suffix.
  */
 interface StatsFormatOptions {
@@ -83,7 +107,14 @@ export class Renderer {
 
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
-    const text = `${prefix} ${displayValue}${suffix}`;
+    let text = `${prefix} ${displayValue}`;
+
+    // Frozen at agent_end: show how long the whole Pi task took.
+    const total = this.engine.taskElapsedSeconds;
+    if (!this.engine.isStreaming && total > 0) {
+      text += ` · Total ${formatTaskDuration(total)}`;
+    }
+    text += suffix;
 
     ctx.ui.setStatus(STATUS_KEY, text);
   }
@@ -92,7 +123,7 @@ export class Renderer {
    * Renders the compact server-native status.
    *
    * Live:      ⚡ 68.4 tok/s · Mean 64.9 · PP 1180 tok/s
-   * Finished:  ⚡ Mean 64.7 tok/s · 1248 tok · 19.3s
+   * Finished:  ⚡ Mean 34.1 tok/s · 1248 tok · Gen 36.6s · Total 1m12s
    *
    * The tier color still applies to the headline rate, and the display-mode
    * suffix (TTFT/stats) is preserved so existing configuration keeps working.
@@ -113,9 +144,14 @@ export class Renderer {
           " tok/s",
       );
       if (snapshot.outputTokens > 0) parts.push(snapshot.outputTokens + " tok");
+      // Gen is the server's decode duration (decode_ms / 1000); Total
+      // spans the whole Pi task (prompt processing, all model turns
+      // and tool calls) as measured by this extension.
       if (snapshot.decodeSeconds > 0) {
-        parts.push(snapshot.decodeSeconds.toFixed(1) + "s");
+        parts.push("Gen " + formatTaskDuration(snapshot.decodeSeconds));
       }
+      const total = this.engine.taskElapsedSeconds;
+      if (total > 0) parts.push("Total " + formatTaskDuration(total));
     } else {
       const live = snapshot.liveTps;
       parts.push(

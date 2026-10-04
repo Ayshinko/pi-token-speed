@@ -139,11 +139,11 @@ those numbers directly by adding a `nativeMetrics` block to a provider override:
 }
 ```
 
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `nativeMetrics.url` | string | — | Required. JSON endpoint polled during a stream (no block is applied without it) |
-| `nativeMetrics.intervalMs` | number | `300` | Poll cadence, clamped to 100–5000 ms |
-| `nativeMetrics.timeoutMs` | number | `500` | Per-request timeout, clamped to 100–5000 ms |
+| Key                        | Type   | Default | Description                                                                     |
+| -------------------------- | ------ | ------- | ------------------------------------------------------------------------------- |
+| `nativeMetrics.url`        | string | —       | Required. JSON endpoint polled during a stream (no block is applied without it) |
+| `nativeMetrics.intervalMs` | number | `300`   | Poll cadence, clamped to 100–5000 ms                                            |
+| `nativeMetrics.timeoutMs`  | number | `500`   | Per-request timeout, clamped to 100–5000 ms                                     |
 
 While a stream is running the status bar shows the server's own numbers:
 
@@ -152,12 +152,29 @@ While a stream is running the status bar shows the server's own numbers:
 ```
 
 `Mean` is the decode mean for the request so far and `PP` is the prompt-processing
-(prefill) rate. The prefill rate is latched from the last positive reading, because
-Strata zeroes it once decoding starts. When the request finishes, the status shows
-the server's completed record:
+(prefill) rate. The adapter is armed the moment you send a message — before the
+model request reaches the server — so it can observe the prompt-reading phase and
+capture a baseline of previously finished requests. The prefill rate is latched
+from the last positive reading, because Strata zeroes it once decoding starts.
+When the request finishes, the status shows the server's completed record.
+
+Two durations are reported at the end:
+
+- `Gen` is the server's decode time for the final request (`decode_ms / 1000`).
+- `Total` is measured by the extension itself, from the moment you send a message
+  until `agent_end`, using a monotonic clock. It spans prompt processing, every
+  model turn, and every tool call or shell command in between. It only resets
+  when a new user message starts the next task.
+
+For cloud/other providers without native metrics, the completed status keeps the
+existing format and appends ` · Total 18.4s` (the task duration), e.g.:
 
 ```
-⚡ Mean 64.7 tok/s · 1248 tok · 19.3s
+⚡ TPS: 91.2 tok/s · Total 18.4s
+```
+
+```
+⚡ Mean 34.1 tok/s · 1248 tok · Gen 36.6s · Total 1m12s
 ```
 
 The adapter is strictly opt-in and never throws: if the endpoint is unreachable,
@@ -167,7 +184,6 @@ still behave as configured.
 
 > `nativeMetrics` is only read from `providerOverrides` blocks (it is not a base
 > config key), so it is scoped to the provider that actually serves the model.
-
 
 ### Configuration Validation
 
@@ -195,7 +211,7 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 | `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))       |
 | `displayColors`      | object                         | `{}`        | Hex colors for the suffix parts (see [Display Color Customization](#display-color-customization)) |
 | `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))                     |
-| `nativeMetrics`      | object                         | —           | Opt-in server-reported TPS, only inside `providerOverrides` blocks                                 |
+| `nativeMetrics`      | object                         | —           | Opt-in server-reported TPS, only inside `providerOverrides` blocks                                |
 
 ### Interactive Menu
 

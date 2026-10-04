@@ -149,6 +149,8 @@ export class StrataMetricsPoller {
   private latchedPrefill = 0;
   /** Timestamp of the newest finished request when the stream started. */
   private baselineRequestTime = 0;
+  /** Whether a live `reading`/`generating` reading was ever seen. */
+  private sawLive = false;
 
   constructor(config: NativeMetricsConfig) {
     this.url = config.url.replace(/\/+$/, "");
@@ -167,8 +169,23 @@ export class StrataMetricsPoller {
     this.snapshot = null;
     this.latchedPrefill = 0;
     this.baselineRequestTime = 0;
+    this.sawLive = false;
     this.running = true;
     void this.tick();
+  }
+
+  /**
+   * Ensures the poller is running without resetting per-request state.
+   *
+   * The adapter is armed at user-message start so it can observe the
+   * prompt-processing phase and capture a request baseline before the new
+   * request finishes. When the assistant stream later starts, the engine
+   * calls this instead of `start()` so the already-captured prefill latch
+   * and baseline survive.
+   */
+  ensureRunning(): void {
+    if (this.running) return;
+    this.start();
   }
 
   /** Stops polling; marks the last snapshot as completed for the final render. */
@@ -193,7 +210,23 @@ export class StrataMetricsPoller {
    */
   async finalize(): Promise<NativeMetricsSnapshot | null> {
     const payload = await this.fetch();
-    const completed = parseCompletedRequest(payload, this.baselineRequestTime);
+    let completed = parseCompletedRequest(payload, this.baselineRequestTime);
+
+    // A very short request can complete before the first poll, making the
+    // baseline the request's own timestamp: its record would then be
+    // skipped. That late baseline is detectable when the newest finished
+    // request has exactly the baseline timestamp and no live reading was
+    // ever observed, so fall back to the newest record (never a previous
+    // one, which would have required a live reading to exist).
+    if (
+      !completed &&
+      this.baselineRequestTime > 0 &&
+      !this.sawLive &&
+      newestRequestTime(payload) === this.baselineRequestTime
+    ) {
+      completed = parseCompletedRequest(payload, 0);
+    }
+
     if (completed) this.snapshot = completed;
     this.stop();
     return this.snapshot;
@@ -220,6 +253,7 @@ export class StrataMetricsPoller {
 
     const live = parseLiveMetrics(payload);
     if (!live) return;
+    this.sawLive = true;
 
     if (live.prefillTps > 0) this.latchedPrefill = live.prefillTps;
     this.snapshot = { ...live, prefillTps: this.latchedPrefill };

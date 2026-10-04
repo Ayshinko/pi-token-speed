@@ -64,6 +64,7 @@ export class EventManager {
    */
   handleSessionShutdown(): void {
     this.engine.stop();
+    this.engine.clearTask();
   }
 
   /**
@@ -73,7 +74,12 @@ export class EventManager {
    */
   handleMessageStart(event: { message?: { role?: string } }): void {
     if (event.message?.role === "user") {
+      // A new user request begins a new task timer (and TTFT), while
+      // the native adapter is armed before inference so it can observe
+      // the prompt-processing phase and capture a request baseline early.
+      this.engine.startTask();
       this.engine.startTTFT();
+      this.engine.startNativeMetrics();
     }
   }
 
@@ -101,6 +107,8 @@ export class EventManager {
     event: AgentEndEvent,
     ctx: ExtensionContext,
   ): Promise<void> {
+    // Freeze the whole-task timer before the final status renders Total.
+    this.engine.finishTask();
     this.engine.stop();
     // Give the native adapter one bounded chance to read the finished
     // request record before the final status is rendered.
