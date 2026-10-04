@@ -116,6 +116,59 @@ Resolution timing per key group:
 
 You can also manage overrides interactively with `/tps overrides` (see [Commands](#commands)).
 
+### Native Metrics (server-reported TPS)
+
+Local inference servers such as [Strata](https://github.com/Niko1221/Strata) already
+measure their own throughput and expose it over an HTTP endpoint. Instead of
+estimating TPS from client-side stream deltas, you can ask the extension to read
+those numbers directly by adding a `nativeMetrics` block to a provider override:
+
+```json
+{
+  "tokenSpeed": {
+    "providerOverrides": {
+      "strata": {
+        "nativeMetrics": {
+          "url": "http://127.0.0.1:8080/metrics",
+          "intervalMs": 300,
+          "timeoutMs": 500
+        }
+      }
+    }
+  }
+}
+```
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `nativeMetrics.url` | string | — | Required. JSON endpoint polled during a stream (no block is applied without it) |
+| `nativeMetrics.intervalMs` | number | `300` | Poll cadence, clamped to 100–5000 ms |
+| `nativeMetrics.timeoutMs` | number | `500` | Per-request timeout, clamped to 100–5000 ms |
+
+While a stream is running the status bar shows the server's own numbers:
+
+```
+⚡ 68.4 tok/s · Mean 64.9 · PP 1180 tok/s
+```
+
+`Mean` is the decode mean for the request so far and `PP` is the prompt-processing
+(prefill) rate. The prefill rate is latched from the last positive reading, because
+Strata zeroes it once decoding starts. When the request finishes, the status shows
+the server's completed record:
+
+```
+⚡ Mean 64.7 tok/s · 1248 tok · 19.3s
+```
+
+The adapter is strictly opt-in and never throws: if the endpoint is unreachable,
+times out, or returns an unexpected payload, the extension silently falls back to
+its own sliding-window counter. Tier colors and the `display` suffix (TTFT/stats)
+still behave as configured.
+
+> `nativeMetrics` is only read from `providerOverrides` blocks (it is not a base
+> config key), so it is scoped to the provider that actually serves the model.
+
+
 ### Configuration Validation
 
 Invalid configuration values are automatically corrected to their defaults. A warning notification is displayed in the Pi status bar at session start listing any corrections made. The `slidingWindow` value is also clamped between `100ms` and `30000ms` (30s).
@@ -142,6 +195,7 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 | `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))       |
 | `displayColors`      | object                         | `{}`        | Hex colors for the suffix parts (see [Display Color Customization](#display-color-customization)) |
 | `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))                     |
+| `nativeMetrics`      | object                         | —           | Opt-in server-reported TPS, only inside `providerOverrides` blocks                                 |
 
 ### Interactive Menu
 

@@ -42,7 +42,7 @@ export default async (pi: ExtensionAPI) => {
     eventManager.handleMessageUpdate(event, ctx);
   });
 
-  pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
-    eventManager.handleAgentEnd(event, ctx);
+  pi.on("agent_end", async (event: AgentEndEvent, ctx: ExtensionContext) => {
+    await eventManager.handleAgentEnd(event, ctx);
   });
 };

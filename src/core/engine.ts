@@ -1,5 +1,7 @@
 import { settings } from "../config/settings";
 import type { TokenSpeedConfig } from "../config/types";
+import type { NativeMetricsSnapshot } from "../native/strata-metrics";
+import { StrataMetricsPoller } from "../native/strata-metrics";
 import {
   COUNT_STRATEGY_DEFAULT,
   type CountStrategy,
@@ -36,6 +38,12 @@ export class TokenSpeedEngine {
   private _countStrategy: CountStrategy = COUNT_STRATEGY_DEFAULT;
   private _endTpsBehavior: EndTpsBehavior = END_TPS_BEHAVIOR_DEFAULT;
   private _providerId: string | undefined;
+  /**
+   * Optional server-native metrics adapter (opt-in via
+   * `providerOverrides.<provider>.nativeMetrics`). Null when the provider has
+   * no adapter configured, which keeps the counter-only path intact.
+   */
+  private _native: StrataMetricsPoller | null = null;
 
   constructor() {
     this._slidingWindow = new SlidingWindow(SLIDING_WINDOW_DEFAULT);
@@ -79,6 +87,12 @@ export class TokenSpeedEngine {
     this._countStrategy = config.countStrategy;
     this._useProviderTokens = config.useProviderTokens;
     this._endTpsBehavior = config.endTpsBehavior;
+
+    // Reconfigure the native metrics adapter (opt-in, per provider).
+    this._native?.stop();
+    this._native = config.nativeMetrics
+      ? new StrataMetricsPoller(config.nativeMetrics)
+      : null;
   }
 
   /**
@@ -176,6 +190,33 @@ export class TokenSpeedEngine {
   }
 
   /**
+   * Bounded end-of-stream fetch so the final status can use the server's own
+   * completed-request record. No-op (and never throws) when no adapter is
+   * configured, leaving the counter-based fallback untouched.
+   */
+  async finalizeNativeMetrics(): Promise<void> {
+    if (!this._native) return;
+    try {
+      await this._native.finalize();
+    } catch {
+      this._native.stop();
+    }
+  }
+
+  /**
+   * Server-native metrics snapshot for the current request, or null when the
+   * provider has no adapter or the endpoint produced nothing usable.
+   */
+  get nativeSnapshot(): NativeMetricsSnapshot | null {
+    return this._native?.current ?? null;
+  }
+
+  /** Whether the active provider has a native metrics adapter configured. */
+  get hasNativeMetrics(): boolean {
+    return this._native !== null;
+  }
+
+  /**
    * Returns time to first token in milliseconds
    */
   get ttft(): number {
@@ -196,6 +237,8 @@ export class TokenSpeedEngine {
     this._countedUsageOutput = 0;
     this._tps = 0;
     this._pausedMs = 0;
+
+    this._native?.start();
   }
 
   /**
@@ -222,6 +265,7 @@ export class TokenSpeedEngine {
     this._isStreaming = false;
     this._endTime = Date.now();
     this._slidingWindow.reset();
+    this._native?.stop();
   }
 
   /**

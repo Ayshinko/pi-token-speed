@@ -91,13 +91,20 @@ export class EventManager {
   }
 
   /**
-   * Reconciles the total token count, stops streaming, and updates the renderer.
+   * Reconciles the total token count, stops streaming, finalizes native
+   * metrics (when configured), and updates the renderer.
    *
    * @param event The message_end event payload.
    * @param ctx The Pi extension context.
    */
-  handleAgentEnd(event: AgentEndEvent, ctx: ExtensionContext): void {
+  async handleAgentEnd(
+    event: AgentEndEvent,
+    ctx: ExtensionContext,
+  ): Promise<void> {
     this.engine.stop();
+    // Give the native adapter one bounded chance to read the finished
+    // request record before the final status is rendered.
+    await this.engine.finalizeNativeMetrics();
 
     // Only assistant and toolResult messages carry usage data
     const outputTokens = event.messages.reduce((acc, curr) => {

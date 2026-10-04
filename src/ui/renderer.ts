@@ -4,6 +4,7 @@ import { settings } from "../config/settings";
 import type { DisplayColors, TokenSpeedConfig } from "../config/types";
 import { TokenSpeedEngine } from "../core/engine";
 import { type DisplayMode } from "../settings/items/display";
+import type { NativeMetricsSnapshot } from "../native/strata-metrics";
 import { truecolor } from "./ansi";
 
 /**
@@ -60,6 +61,13 @@ export class Renderer {
     const config = settings.getEffectiveConfig(ctx.model?.provider);
     const theme = ctx.ui.theme;
 
+    // Server-native metrics (opt-in) take precedence over the counter.
+    const native = this.engine.nativeSnapshot;
+    if (native) {
+      this.renderNative(ctx, config, native);
+      return;
+    }
+
     // Render TPS first
     const { tps } = this.engine;
     const measurement = `${tps.toFixed(1)} tok/s`;
@@ -78,6 +86,55 @@ export class Renderer {
     const text = `${prefix} ${displayValue}${suffix}`;
 
     ctx.ui.setStatus(STATUS_KEY, text);
+  }
+
+  /**
+   * Renders the compact server-native status.
+   *
+   * Live:      ⚡ 68.4 tok/s · Mean 64.9 · PP 1180 tok/s
+   * Finished:  ⚡ Mean 64.7 tok/s · 1248 tok · 19.3s
+   *
+   * The tier color still applies to the headline rate, and the display-mode
+   * suffix (TTFT/stats) is preserved so existing configuration keeps working.
+   */
+  private renderNative(
+    ctx: ExtensionContext,
+    config: TokenSpeedConfig,
+    snapshot: NativeMetricsSnapshot,
+  ): void {
+    const icon = config.icon ? config.icon + " " : "";
+    const parts: string[] = [];
+
+    if (snapshot.completed) {
+      const mean = snapshot.meanTps || snapshot.liveTps;
+      parts.push(
+        "Mean " +
+          truecolor(mean.toFixed(1), this.getColor(config, mean)) +
+          " tok/s",
+      );
+      if (snapshot.outputTokens > 0) parts.push(snapshot.outputTokens + " tok");
+      if (snapshot.decodeSeconds > 0) {
+        parts.push(snapshot.decodeSeconds.toFixed(1) + "s");
+      }
+    } else {
+      const live = snapshot.liveTps;
+      parts.push(
+        truecolor(live.toFixed(1), this.getColor(config, live)) + " tok/s",
+      );
+      if (snapshot.meanTps > 0) {
+        parts.push("Mean " + snapshot.meanTps.toFixed(1));
+      }
+      if (snapshot.prefillTps > 0) {
+        parts.push("PP " + Math.round(snapshot.prefillTps) + " tok/s");
+      }
+    }
+
+    const suffix = this.buildSuffix(config.display, {
+      formatDuration: config.formatDuration,
+      displayColors: config.displayColors,
+    });
+
+    ctx.ui.setStatus(STATUS_KEY, icon + parts.join(" · ") + suffix);
   }
 
   /**
