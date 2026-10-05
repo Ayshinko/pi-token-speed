@@ -2,6 +2,7 @@ import type {
   AgentEndEvent,
   AgentSettledEvent,
   BeforeAgentStartEvent,
+  BeforeProviderRequestEvent,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
@@ -50,6 +51,21 @@ export default async (pi: ExtensionAPI) => {
   pi.on("agent_settled", async (event: AgentSettledEvent, ctx) => {
     await eventManager.handleAgentSettled(event, ctx);
   });
+
+  // `before_provider_request` fires once for every actual provider/model
+  // request inside the task — the first request, each model turn after a tool
+  // call, agent-level retries, compaction, and queued continuation — right
+  // before the provider HTTP call. It is the model-request boundary: the
+  // poller resets its per-request tracking state here (baseline, prefill
+  // latch, live flag, snapshot) while the task timer and the poll timer keep
+  // running. This is what keeps Request B from inheriting Request A's prefill
+  // latch or showing Request A's completed record while B is live.
+  pi.on(
+    "before_provider_request",
+    (_event: BeforeProviderRequestEvent, ctx: ExtensionContext) => {
+      eventManager.handleBeforeProviderRequest(ctx);
+    },
+  );
 
   pi.on("message_update", (event, ctx: ExtensionContext) => {
     eventManager.handleMessageUpdate(event, ctx);

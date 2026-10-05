@@ -25,11 +25,18 @@ import {
  *   the user message is added. It does not fire for queued steering or
  *   follow-up messages, for retries, compaction, or continuation, so it is
  *   the task start.
+ * - `before_provider_request` fires once per actual provider/model request
+ *   inside the task (first request, each model turn after a tool call,
+ *   agent-level retries, compaction, queued continuation) right before the
+ *   provider HTTP call. It is the model-request boundary: per-request native
+ *   tracking state is reset there while the task timer and the native poll
+ *   timer keep running.
  * - `agent_end` closes one assistant stream. The task is not over: tool
  *   calls, retries, compaction, and queued continuation can follow, so the
  *   task timer and the native poller survive it.
  * - `agent_settled` fires once when the whole submitted prompt is done. It
- *   is the task end: the task timer freezes there and native polling stops.
+ *   is the task end: the task timer freezes there immediately (before the
+ *   final bounded metrics fetch) and native polling stops.
  */
 export class EventManager {
   private readonly registry: MessageHandlerRegistry;
@@ -161,9 +168,26 @@ export class EventManager {
   }
 
   /**
-   * Ends the task: gives the native adapter one bounded chance to read the
-   * finished request record, freezes the task timer, stops polling, and
-   * renders the final status.
+   * Resets per-request native tracking state when a new provider/model
+   * request begins (`before_provider_request`).
+   *
+   * The task timer already started at `before_agent_start` and is untouched
+   * here; the native poller keeps running continuously. This is the boundary
+   * that keeps Request B from inheriting Request A's prefill latch or from
+   * displaying Request A's completed record while B is live.
+   *
+   * @param ctx The Pi extension context.
+   */
+  handleBeforeProviderRequest(ctx: ExtensionContext): void {
+    this.ctx = ctx;
+    this.engine.beginNativeRequest();
+  }
+
+  /**
+   * Ends the task: freezes the task timer FIRST (so the final bounded metrics
+   * fetch can never inflate Total), then gives the native adapter one bounded
+   * chance to read the finished request record, stops polling, and renders
+   * the final status.
    *
    * @param _event The agent_settled event payload (unused).
    * @param ctx The Pi extension context.
@@ -174,10 +198,14 @@ export class EventManager {
   ): Promise<void> {
     this.ctx = ctx;
     this.engine.stopStreaming();
-    // Bounded end-of-task fetch (never throws). Stops polling on success and
-    // falls back to the last live snapshot when the endpoint is unavailable.
-    await this.engine.finalizeNativeMetrics();
+    // 1) Freeze Total IMMEDIATELY: Total means wall-clock time from task
+    // submission until Pi settles, so a slow final metrics fetch must not
+    // count toward it.
     this.engine.finishTask();
+    // 2) Then the bounded end-of-task fetch (never throws). Stops polling on
+    // success and falls back to the last live snapshot when the endpoint is
+    // unavailable.
+    await this.engine.finalizeNativeMetrics();
     this.engine.stopNativeMetrics();
 
     this.renderer.resetThrottle();

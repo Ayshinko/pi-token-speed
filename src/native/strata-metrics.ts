@@ -41,12 +41,14 @@ export interface NativeMetricsSnapshot {
 
 /**
  * Listener invoked when a poll yields a snapshot that differs from the
- * previous one. The footer is delta-driven, so during a quiet prefill or a
- * long tool call no text delta arrives and the renderer never fires; this
- * callback is the hook that requests a TUI redraw on native changes.
+ * previous one (or when per-request tracking is reset for a new provider
+ * request, in which case it receives `null`). The footer is delta-driven, so
+ * during a quiet prefill or a long tool call no text delta arrives and the
+ * renderer never fires; this callback is the hook that requests a TUI
+ * redraw on native changes.
  */
 export type NativeMetricsUpdateListener = (
-  snapshot: NativeMetricsSnapshot,
+  snapshot: NativeMetricsSnapshot | null,
 ) => void;
 
 /**
@@ -204,7 +206,7 @@ export class StrataMetricsPoller {
     return this.snapshot;
   }
 
-  /** Starts polling for a new request, resetting all per-request state. */
+  /** Starts polling for a new task, resetting all tracking state. */
   start(): void {
     this.stop();
     this.snapshot = null;
@@ -213,6 +215,31 @@ export class StrataMetricsPoller {
     this.sawLive = false;
     this.running = true;
     void this.tick();
+  }
+
+  /**
+   * Resets ONLY the per-model-request tracking state when a new provider
+   * request is about to begin (`before_provider_request`).
+   *
+   * The polling timer is task-scoped: it is started once at
+   * `before_agent_start` and stopped at `agent_settled`, and must keep
+   * running across model turns, tool calls, retries, and compaction. Only the
+   * identity of the request the poller attributes metrics to is cleared here:
+   * the finished-request baseline, the prefill latch, the live-reading flag,
+   * and the current snapshot. This guarantees that a completed record from
+   * Request A (still present in `/metrics.requests` while Request B runs) is
+   * never mistaken for Request B's result.
+   */
+  beginNativeRequest(): void {
+    const hadSnapshot = this.snapshot !== null;
+    this.snapshot = null;
+    this.latchedPrefill = 0;
+    this.baselineRequestTime = 0;
+    this.sawLive = false;
+    // Immediately drop whatever the previous request rendered: between this
+    // reset and the first poll of the new request, the footer must not keep
+    // showing Request A's completed Mean/tokens/Gen.
+    if (hadSnapshot) this.onUpdate?.(null);
   }
 
   /**

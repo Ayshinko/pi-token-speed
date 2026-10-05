@@ -247,7 +247,7 @@ describe("native footer lifecycle", () => {
 
   it("wires the listener into adapters created by a later provider switch", async () => {
     const calls = stubFetch([livePayload()]);
-    const seen: NativeMetricsSnapshot[] = [];
+    const seen: (NativeMetricsSnapshot | null)[] = [];
 
     engine.setNativeUpdateListener((snapshot) => seen.push(snapshot));
     engine.applyProvider("another-provider"); // rebuilds the adapter
@@ -256,7 +256,7 @@ describe("native footer lifecycle", () => {
 
     expect(calls.count).toBeGreaterThan(0);
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen[0].liveTps).toBe(68.4);
+    expect(seen[0]?.liveTps).toBe(68.4);
     engine.stopNativeMetrics();
   });
 
@@ -277,6 +277,166 @@ describe("native footer lifecycle", () => {
 
     expect(late.statuses.some((s) => s.includes("68.4"))).toBe(true);
     engine.stopNativeMetrics();
+  });
+
+  it("Request A → tool → Request B: B shows B live/PP and never A's completed record", async () => {
+    const aRec = {
+      time: 100,
+      output_tokens: 1248,
+      decode_tok_s: 64.7,
+      decode_ms: 19300,
+    };
+    const bRec = {
+      time: 200,
+      output_tokens: 888,
+      decode_tok_s: 80.0,
+      decode_ms: 11100,
+    };
+    const payloads = [
+      livePayload({
+        state: "reading",
+        tok_s: 0,
+        tok_s_mean: 0,
+        prefill_tok_s_mean: 1500,
+        generated: 0,
+      }),
+      livePayload({ tok_s: 55.0, tok_s_mean: 52.0, prefill_tok_s_mean: 0 }),
+      { live: { state: "idle" }, requests: [aRec] }, // A completes
+      livePayload({
+        state: "reading",
+        tok_s: 0,
+        tok_s_mean: 0,
+        prefill_tok_s_mean: 900,
+        generated: 0,
+      }), // B reading (A record still present)
+      livePayload({
+        state: "reading",
+        tok_s: 0,
+        tok_s_mean: 0,
+        prefill_tok_s_mean: 900,
+        generated: 0,
+      }), // B reading, repeated window
+      livePayload({ tok_s: 71.2, tok_s_mean: 66.0, prefill_tok_s_mean: 0 }), // B generating
+      { live: { state: "idle" }, requests: [bRec, aRec] }, // B completes
+    ];
+    stubFetch(payloads);
+
+    await em.handleSessionStart(ctx);
+    em.handleBeforeAgentStart(submitEvent(), ctx);
+    em.handleBeforeProviderRequest(ctx); // Request A begins
+    await sleep(60);
+
+    // Request A live: footer shows A's live TPS / Mean / PP.
+    expect(statuses.some((s) => s.includes("PP 1500"))).toBe(true);
+    expect(statuses.some((s) => s.includes("55.0 tok/s"))).toBe(true);
+
+    // Stream closes (tool boundary / turn end); the task keeps running and
+    // A's completed record stays in /metrics.requests while B runs.
+    em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    em.handleBeforeProviderRequest(ctx); // Request B begins
+    const duringB = statuses.length;
+    await sleep(100);
+
+    expect(statuses.slice(duringB).some((s) => s.includes("Mean 64.7"))).toBe(
+      false,
+    );
+    expect(statuses.slice(duringB).some((s) => s.includes("1248 tok"))).toBe(
+      false,
+    );
+    // B runs live: the footer must show B's own reading/generating metrics.
+    expect(
+      statuses
+        .slice(duringB)
+        .some((s) => s.includes("PP 900") || s.includes("71.2 tok/s")),
+    ).toBe(true);
+
+    await em.handleAgentSettled(settleEvent(), ctx);
+    const text = last(statuses);
+    expect(text).toContain("Mean 80.0 tok/s"); // completed record is B's
+    expect(text).toContain("888 tok");
+    expect(text).not.toContain("1248 tok");
+  });
+
+  it("Request B reading shows B's prefill, not A's completed snapshot", async () => {
+    const aRec = {
+      time: 100,
+      output_tokens: 1248,
+      decode_tok_s: 64.7,
+      decode_ms: 19300,
+    };
+    stubFetch([
+      livePayload({ tok_s: 55.0, tok_s_mean: 52.0, prefill_tok_s_mean: 0 }),
+      { live: { state: "idle" }, requests: [aRec] }, // A completes
+      livePayload({
+        state: "reading",
+        tok_s: 0,
+        tok_s_mean: 0,
+        prefill_tok_s_mean: 900,
+        generated: 0,
+      }), // B reading
+    ]);
+
+    await em.handleSessionStart(ctx);
+    em.handleBeforeAgentStart(submitEvent(), ctx);
+    em.handleBeforeProviderRequest(ctx); // Request A begins
+    await sleep(50);
+    em.handleBeforeProviderRequest(ctx); // Request B begins
+    await sleep(60);
+
+    expect(last(statuses)).toContain("PP 900"); // B's own prefill
+    expect(statuses.some((s) => s.includes("Mean 64.7"))).toBe(false);
+    expect(statuses.some((s) => s.includes("1248 tok"))).toBe(false);
+
+    await em.handleAgentSettled(settleEvent(), ctx);
+  });
+
+  it("agent_settled freezes Total before the final native fetch runs", async () => {
+    let slowFinal = false;
+    vi.stubGlobal("fetch", async (_url: string, opts?: { signal?: AbortSignal }) => {
+      if (slowFinal) await sleep(250);
+      if (opts?.signal?.aborted) throw new Error("aborted");
+      return { ok: true, json: async () => livePayload() };
+    });
+
+    await em.handleSessionStart(ctx);
+    em.handleBeforeAgentStart(submitEvent(), ctx);
+    await sleep(60);
+    const before = engine.taskElapsedSeconds; // free-running Total
+
+    slowFinal = true; // the settle fetch now takes 250ms (timeout range)
+    await em.handleAgentSettled(settleEvent(), ctx);
+
+    const frozen = engine.taskElapsedSeconds;
+    // The 250ms final fetch must NOT have inflated Total.
+    expect(frozen).toBeLessThan(before + 0.12);
+    await sleep(80);
+    expect(engine.taskElapsedSeconds).toBe(frozen);
+  });
+
+  it("a new submitted prompt does not inherit native state from the previous task", async () => {
+    const aRec = {
+      time: 100,
+      output_tokens: 1248,
+      decode_tok_s: 64.7,
+      decode_ms: 19300,
+    };
+    stubFetch([livePayload(), { live: { state: "idle" }, requests: [aRec] }]);
+
+    await em.handleSessionStart(ctx);
+    em.handleBeforeAgentStart(submitEvent(), ctx);
+    em.handleBeforeProviderRequest(ctx); // Request A begins
+    await sleep(60);
+    expect(engine.nativeSnapshot?.liveTps).toBe(68.4); // A live
+
+    await em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    await em.handleAgentSettled(settleEvent(), ctx);
+    expect(engine.nativeSnapshot?.completed).toBe(true); // A finalized
+
+    // New prompt in the same session: nothing may leak from the old task.
+    em.handleBeforeAgentStart(submitEvent(), ctx);
+    expect(engine.nativeSnapshot).toBeNull();
+    expect(engine.isTaskFinished).toBe(false);
+    em.handleSessionShutdown();
   });
 
   it("the renderer does not publish identical text twice", () => {
@@ -322,7 +482,7 @@ describe("snapshotsEqual", () => {
       livePayload({ tok_s: 71.2 }),
     ];
     const calls = stubFetch(payloads);
-    const seen: NativeMetricsSnapshot[] = [];
+    const seen: (NativeMetricsSnapshot | null)[] = [];
 
     const poller = new StrataMetricsPoller(
       { url: "http://x/metrics", intervalMs: 15 },
@@ -334,7 +494,7 @@ describe("snapshotsEqual", () => {
 
     expect(calls.count).toBeGreaterThan(2);
     expect(seen).toHaveLength(2);
-    expect(seen[0].liveTps).toBe(68.4);
-    expect(seen[1].liveTps).toBe(71.2);
+    expect(seen[0]?.liveTps).toBe(68.4);
+    expect(seen[1]?.liveTps).toBe(71.2);
   });
 });

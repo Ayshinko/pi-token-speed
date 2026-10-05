@@ -236,16 +236,34 @@ export class TokenSpeedEngine {
   }
 
   /**
-   * Arms the native metrics adapter for the request that is about to run.
+   * Starts the task-level native poller for the prompt that is about to run.
    *
    * Called when the user submits a prompt (`before_agent_start`), i.e. before
-   * model inference, so the
-   * adapter can observe the server's prompt-processing phase and capture a
-   * request baseline before this request finishes. No-op (and never polls)
-   * when the active provider has no adapter configured.
+   * model inference, so the adapter can observe the server's
+   * prompt-processing phase and capture a request baseline before the first
+   * request finishes. This is TASK-scoped: the timer keeps running across
+   * model turns, tool calls, retries, and compaction until `agent_settled`.
+   * Which individual provider request the poller attributes metrics to is
+   * reset separately by `beginNativeRequest()` at `before_provider_request`.
+   * No-op (and never polls) when the active provider has no adapter
+   * configured.
    */
   startNativeMetrics(): void {
     this._native?.start();
+  }
+
+  /**
+   * Resets only the per-model-request native tracking state when a new
+   * provider request is about to begin (`before_provider_request`).
+   *
+   * Never restarts the polling timer (task-scoped) and never touches the task
+   * timer: model turns, tool calls, retries, compaction, and queued
+   * continuation inside one task keep both running continuously. This is the
+   * boundary that keeps Request B from inheriting Request A's prefill latch or
+   * from displaying Request A's completed record while B is live.
+   */
+  beginNativeRequest(): void {
+    this._native?.beginNativeRequest();
   }
 
   /**
