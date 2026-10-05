@@ -39,6 +39,36 @@ export interface NativeMetricsSnapshot {
   completed: boolean;
 }
 
+/**
+ * Listener invoked when a poll yields a snapshot that differs from the
+ * previous one. The footer is delta-driven, so during a quiet prefill or a
+ * long tool call no text delta arrives and the renderer never fires; this
+ * callback is the hook that requests a TUI redraw on native changes.
+ */
+export type NativeMetricsUpdateListener = (
+  snapshot: NativeMetricsSnapshot,
+) => void;
+
+/**
+ * Field-by-field snapshot comparison (not object identity): a poll that
+ * returns the same numbers must not trigger a redraw.
+ */
+export function snapshotsEqual(
+  a: NativeMetricsSnapshot | null,
+  b: NativeMetricsSnapshot | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.liveTps === b.liveTps &&
+    a.meanTps === b.meanTps &&
+    a.prefillTps === b.prefillTps &&
+    a.outputTokens === b.outputTokens &&
+    a.decodeSeconds === b.decodeSeconds &&
+    a.completed === b.completed
+  );
+}
+
 /** `true` for finite numbers, `0` otherwise (missing/null/NaN fields). */
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -151,11 +181,22 @@ export class StrataMetricsPoller {
   private baselineRequestTime = 0;
   /** Whether a live `reading`/`generating` reading was ever seen. */
   private sawLive = false;
+  /** Change listener wired by the engine once the extension context is known. */
+  private onUpdate: NativeMetricsUpdateListener | undefined;
 
-  constructor(config: NativeMetricsConfig) {
+  constructor(
+    config: NativeMetricsConfig,
+    onUpdate?: NativeMetricsUpdateListener,
+  ) {
     this.url = config.url.replace(/\/+$/, "");
     this.intervalMs = config.intervalMs ?? DEFAULT_INTERVAL_MS;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.onUpdate = onUpdate;
+  }
+
+  /** Replaces the change listener (set once per session). */
+  setOnUpdate(listener: NativeMetricsUpdateListener | undefined): void {
+    this.onUpdate = listener;
   }
 
   /** Latest snapshot, or `null` when native metrics are unavailable. */
@@ -177,7 +218,7 @@ export class StrataMetricsPoller {
   /**
    * Ensures the poller is running without resetting per-request state.
    *
-   * The adapter is armed at user-message start so it can observe the
+   * The adapter is armed when the user submits a prompt so it can observe the
    * prompt-processing phase and capture a request baseline before the new
    * request finishes. When the assistant stream later starts, the engine
    * calls this instead of `start()` so the already-captured prefill latch
@@ -204,9 +245,9 @@ export class StrataMetricsPoller {
   }
 
   /**
-   * One last bounded fetch at the end of the stream, so the final status can
-   * use the server's own completed-request record. Falls back to the last
-   * live snapshot when the endpoint is unavailable.
+   * One last bounded fetch at the end of the task (`agent_settled`), so the
+   * final status can use the server's own completed-request record. Falls back
+   * to the last live snapshot when the endpoint is unavailable.
    */
   async finalize(): Promise<NativeMetricsSnapshot | null> {
     const payload = await this.fetch();
@@ -227,7 +268,11 @@ export class StrataMetricsPoller {
       completed = parseCompletedRequest(payload, 0);
     }
 
-    if (completed) this.snapshot = completed;
+    if (completed) {
+      const changed = !snapshotsEqual(this.snapshot, completed);
+      this.snapshot = completed;
+      if (changed) this.onUpdate?.(completed);
+    }
     this.stop();
     return this.snapshot;
   }
@@ -256,11 +301,18 @@ export class StrataMetricsPoller {
     this.sawLive = true;
 
     if (live.prefillTps > 0) this.latchedPrefill = live.prefillTps;
-    this.snapshot = { ...live, prefillTps: this.latchedPrefill };
+    const previous = this.snapshot;
+    let next: NativeMetricsSnapshot = {
+      ...live,
+      prefillTps: this.latchedPrefill,
+    };
 
     // A request can finish before agent_end is delivered; prefer its record.
     const completed = parseCompletedRequest(payload, this.baselineRequestTime);
-    if (completed) this.snapshot = completed;
+    if (completed) next = completed;
+
+    this.snapshot = next;
+    if (!snapshotsEqual(previous, next)) this.onUpdate?.(next);
   }
 
   /** Fetches `/metrics`, returning `undefined` on any failure. */

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentEndEvent,
+  AgentSettledEvent,
+  BeforeAgentStartEvent,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { TokenSpeedConfig } from "../src/config/types";
@@ -146,40 +148,104 @@ describe("EventManager task wiring", () => {
     em = new EventManager(engine, new Renderer(engine));
   });
 
-  it("a user message starts the task timer", () => {
-    em.handleMessageStart({ message: { role: "user" } });
-    expect(engine.taskElapsedSeconds).toBeGreaterThanOrEqual(0);
-  });
-
-  it("agent_end freezes the task timer", async () => {
-    em.handleMessageStart({ message: { role: "user" } });
-    await sleep(20);
-    await em.handleAgentEnd(
+  const submit = () =>
+    em.handleBeforeAgentStart(
       {
-        messages: [{ role: "assistant", usage: { output: 10 } }],
-      } as unknown as AgentEndEvent,
+        type: "before_agent_start",
+        prompt: "hi",
+        systemPrompt: "",
+        systemPromptOptions: [],
+      } as unknown as BeforeAgentStartEvent,
       ctx,
     );
+
+  const settle = () =>
+    em.handleAgentSettled({ type: "agent_settled" } as AgentSettledEvent, ctx);
+
+  it("submitting a prompt starts the task timer", async () => {
+    submit();
+    await sleep(5);
+    expect(engine.taskElapsedSeconds).toBeGreaterThan(0);
+    expect(engine.isTaskFinished).toBe(false);
+  });
+
+  it("agent_end does not freeze the task timer", async () => {
+    submit();
+    await sleep(20);
+    em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    expect(engine.isTaskFinished).toBe(false);
+    const growing = engine.taskElapsedSeconds;
+    await sleep(20);
+    expect(engine.taskElapsedSeconds).toBeGreaterThan(growing);
+  });
+
+  it("agent_settled freezes the task timer", async () => {
+    submit();
+    await sleep(20);
+    await settle();
+    expect(engine.isTaskFinished).toBe(true);
     const frozen = engine.taskElapsedSeconds;
-    expect(frozen).toBeGreaterThan(0);
-    await sleep(40);
+    await sleep(30);
     expect(engine.taskElapsedSeconds).toBe(frozen);
   });
 
-  it("a new user message starts a fresh task", async () => {
-    em.handleMessageStart({ message: { role: "user" } });
+  it("the timer spans multiple turns, tool calls, and continuations", async () => {
+    submit();
+    await sleep(20);
+    em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    await sleep(20);
+    em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    await sleep(20);
+    await settle();
+    expect(engine.taskElapsedSeconds).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it("a queued steering message does not restart the task timer", async () => {
+    submit();
+    await sleep(20);
+    em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    // Queued steering emits message_start with role=user mid-run. There is no
+    // message_start task-start handler, so the timer keeps running from the
+    // original submission.
+    expect(
+      (em as unknown as { handleMessageStart?: unknown }).handleMessageStart,
+    ).toBeUndefined();
+    await sleep(20);
+    await settle();
+    expect(engine.taskElapsedSeconds).toBeGreaterThanOrEqual(0.04);
+  });
+
+  it("agent_settled without a submitted prompt leaves the timer at zero", async () => {
+    await settle();
+    expect(engine.taskElapsedSeconds).toBe(0);
+    expect(engine.isTaskFinished).toBe(false);
+  });
+
+  it("the first freeze wins (repeated settle is idempotent)", async () => {
+    submit();
+    await sleep(20);
+    await settle();
+    const frozen = engine.taskElapsedSeconds;
+    await sleep(20);
+    await settle();
+    expect(engine.taskElapsedSeconds).toBe(frozen);
+  });
+
+  it("a new submitted prompt restarts the task timer", async () => {
+    submit();
     await sleep(30);
-    await em.handleAgentEnd({ messages: [] } as unknown as AgentEndEvent, ctx);
+    await settle();
     const old = engine.taskElapsedSeconds;
-    await sleep(10);
-    em.handleMessageStart({ message: { role: "user" } });
+    submit();
     expect(engine.taskElapsedSeconds).toBeLessThan(old);
+    expect(engine.isTaskFinished).toBe(false);
   });
 
   it("session shutdown clears the task timer", () => {
-    em.handleMessageStart({ message: { role: "user" } });
+    submit();
     expect(engine.taskElapsedSeconds).toBeGreaterThanOrEqual(0);
     em.handleSessionShutdown();
     expect(engine.taskElapsedSeconds).toBe(0);
+    expect(engine.isTaskFinished).toBe(false);
   });
 });

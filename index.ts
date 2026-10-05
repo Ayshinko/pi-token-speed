@@ -1,5 +1,7 @@
 import type {
   AgentEndEvent,
+  AgentSettledEvent,
+  BeforeAgentStartEvent,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
@@ -33,15 +35,28 @@ export default async (pi: ExtensionAPI) => {
     eventManager.handleSessionShutdown();
   });
 
-  // Streaming lifecycle
-  pi.on("message_start", (event) => {
-    eventManager.handleMessageStart(event);
+  // Task lifecycle
+  //
+  // `before_agent_start` fires once when the user submits a prompt, before
+  // inference. It does not fire for queued steering/follow-up messages, so
+  // the task timer starts exactly once per submitted prompt.
+  pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx) => {
+    eventManager.handleBeforeAgentStart(event, ctx);
+  });
+
+  // `agent_settled` fires once when the whole submitted prompt is done
+  // (retries, compaction, and queued continuation included): the task timer
+  // freezes and native polling stops here, not at `agent_end`.
+  pi.on("agent_settled", async (event: AgentSettledEvent, ctx) => {
+    await eventManager.handleAgentSettled(event, ctx);
   });
 
   pi.on("message_update", (event, ctx: ExtensionContext) => {
     eventManager.handleMessageUpdate(event, ctx);
   });
 
+  // `agent_end` closes one assistant stream: reconcile tokens and redraw,
+  // keeping the task timer and the native poller alive.
   pi.on("agent_end", async (event: AgentEndEvent, ctx: ExtensionContext) => {
     await eventManager.handleAgentEnd(event, ctx);
   });

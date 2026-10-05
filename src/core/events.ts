@@ -1,5 +1,7 @@
 import type {
   AgentEndEvent,
+  AgentSettledEvent,
+  BeforeAgentStartEvent,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { TOKEN_GENERATION_TOOLS } from "../config/constants";
@@ -17,9 +19,22 @@ import {
 
 /**
  * Manages all Pi event subscriptions for the token-speed extension.
+ *
+ * Task boundaries:
+ * - `before_agent_start` fires once when the user submits a prompt, before
+ *   the user message is added. It does not fire for queued steering or
+ *   follow-up messages, for retries, compaction, or continuation, so it is
+ *   the task start.
+ * - `agent_end` closes one assistant stream. The task is not over: tool
+ *   calls, retries, compaction, and queued continuation can follow, so the
+ *   task timer and the native poller survive it.
+ * - `agent_settled` fires once when the whole submitted prompt is done. It
+ *   is the task end: the task timer freezes there and native polling stops.
  */
 export class EventManager {
   private readonly registry: MessageHandlerRegistry;
+  /** Most recent extension context, used to redraw when no event carries one. */
+  private ctx: ExtensionContext | undefined;
 
   constructor(
     private readonly engine: TokenSpeedEngine,
@@ -53,34 +68,53 @@ export class EventManager {
       ctx.ui.notify(message, "warning");
     }
 
+    this.ctx = ctx;
     this.engine.initialize();
     this.engine.applyProvider(ctx.model?.provider);
+
+    // Native snapshots change while the stream is quiet (prefill, long tool
+    // calls), when no text delta arrives and the delta-driven renderer never
+    // fires. The poller notifies this listener on meaningful changes; the
+    // renderer's setStatus path invalidates the TUI footer.
+    this.engine.setNativeUpdateListener(() => {
+      if (this.ctx) this.renderer.update(this.ctx);
+    });
+
     this.renderer.initialize(ctx);
     this.renderer.resetThrottle();
   }
 
   /**
-   * Stops the engine when the session shuts down.
+   * Stops the engine, the native poller, and the task timer on shutdown.
    */
   handleSessionShutdown(): void {
     this.engine.stop();
     this.engine.clearTask();
+    this.engine.setNativeUpdateListener(undefined);
+    this.ctx = undefined;
   }
 
   /**
-   * Starts TTFT measurement for user messages and begins streaming for assistant messages.
+   * Starts the task timer, TTFT, and the native adapter when the user
+   * submits a prompt.
    *
-   * @param event The message_start event payload.
+   * The provider override is applied first so the adapter is armed with the
+   * settings of the model that will run. Arming before inference lets the
+   * adapter observe the prompt-processing phase and capture the request
+   * baseline before this request finishes.
+   *
+   * @param _event The before_agent_start event payload (prompt text; unused).
+   * @param ctx The Pi extension context.
    */
-  handleMessageStart(event: { message?: { role?: string } }): void {
-    if (event.message?.role === "user") {
-      // A new user request begins a new task timer (and TTFT), while
-      // the native adapter is armed before inference so it can observe
-      // the prompt-processing phase and capture a request baseline early.
-      this.engine.startTask();
-      this.engine.startTTFT();
-      this.engine.startNativeMetrics();
-    }
+  handleBeforeAgentStart(
+    _event: BeforeAgentStartEvent,
+    ctx: ExtensionContext,
+  ): void {
+    this.ctx = ctx;
+    this.engine.applyProvider(ctx.model?.provider);
+    this.engine.startTask();
+    this.engine.startTTFT();
+    this.engine.startNativeMetrics();
   }
 
   /**
@@ -93,26 +127,23 @@ export class EventManager {
     event: MessageUpdatePayload,
     ctx: ExtensionContext,
   ): void {
+    this.ctx = ctx;
     this.registry.handle(event, ctx);
   }
 
   /**
-   * Reconciles the total token count, stops streaming, finalizes native
-   * metrics (when configured), and updates the renderer.
+   * Reconciles the total token count and updates the renderer at the end of
+   * one assistant stream.
    *
-   * @param event The message_end event payload.
+   * Does not freeze the task timer and does not stop native polling: the task
+   * is not finished, so the footer keeps updating until the task settles.
+   *
+   * @param event The agent_end event payload.
    * @param ctx The Pi extension context.
    */
-  async handleAgentEnd(
-    event: AgentEndEvent,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    // Freeze the whole-task timer before the final status renders Total.
-    this.engine.finishTask();
-    this.engine.stop();
-    // Give the native adapter one bounded chance to read the finished
-    // request record before the final status is rendered.
-    await this.engine.finalizeNativeMetrics();
+  handleAgentEnd(event: AgentEndEvent, ctx: ExtensionContext): void {
+    this.ctx = ctx;
+    this.engine.stopStreaming();
 
     // Only assistant and toolResult messages carry usage data
     const outputTokens = event.messages.reduce((acc, curr) => {
@@ -126,6 +157,30 @@ export class EventManager {
     }, 0);
 
     this.engine.reconcileTotal(outputTokens);
+    this.renderer.update(ctx);
+  }
+
+  /**
+   * Ends the task: gives the native adapter one bounded chance to read the
+   * finished request record, freezes the task timer, stops polling, and
+   * renders the final status.
+   *
+   * @param _event The agent_settled event payload (unused).
+   * @param ctx The Pi extension context.
+   */
+  async handleAgentSettled(
+    _event: AgentSettledEvent,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    this.ctx = ctx;
+    this.engine.stopStreaming();
+    // Bounded end-of-task fetch (never throws). Stops polling on success and
+    // falls back to the last live snapshot when the endpoint is unavailable.
+    await this.engine.finalizeNativeMetrics();
+    this.engine.finishTask();
+    this.engine.stopNativeMetrics();
+
+    this.renderer.resetThrottle();
     this.renderer.update(ctx);
   }
 }

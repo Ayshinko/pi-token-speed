@@ -46,6 +46,8 @@ interface StatsFormatOptions {
  */
 export class Renderer {
   private lastUpdateTime = 0;
+  /** Last text published to the footer, used to skip redundant repaints. */
+  private lastText = "";
 
   /**
    * Creates a new Renderer bound to an engine.
@@ -109,13 +111,25 @@ export class Renderer {
     const prefix = theme.fg("dim", `${icon}TPS:`);
     let text = `${prefix} ${displayValue}`;
 
-    // Frozen at agent_end: show how long the whole Pi task took.
+    // Live while the task runs, frozen at agent_settled: how long the whole
+    // Pi task took (prompt processing, model turns, tool calls).
     const total = this.engine.taskElapsedSeconds;
     if (!this.engine.isStreaming && total > 0) {
       text += ` · Total ${formatTaskDuration(total)}`;
     }
     text += suffix;
 
+    this.publish(ctx, text);
+  }
+
+  /**
+   * Publishes the footer text through Pi's status API, which invalidates the
+   * TUI (`setStatus` → `requestRender`). Identical text is skipped so a poll
+   * that produced no meaningful change does not trigger a repaint.
+   */
+  private publish(ctx: ExtensionContext, text: string): void {
+    if (text === this.lastText) return;
+    this.lastText = text;
     ctx.ui.setStatus(STATUS_KEY, text);
   }
 
@@ -170,7 +184,7 @@ export class Renderer {
       displayColors: config.displayColors,
     });
 
-    ctx.ui.setStatus(STATUS_KEY, icon + parts.join(" · ") + suffix);
+    this.publish(ctx, icon + parts.join(" · ") + suffix);
   }
 
   /**
@@ -315,6 +329,7 @@ export class Renderer {
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
     const text = `${prefix} --`;
+    this.lastText = text;
     ctx.ui.setStatus(STATUS_KEY, text);
   }
 

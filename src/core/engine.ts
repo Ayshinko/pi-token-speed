@@ -1,6 +1,9 @@
 import { settings } from "../config/settings";
 import type { TokenSpeedConfig } from "../config/types";
-import type { NativeMetricsSnapshot } from "../native/strata-metrics";
+import type {
+  NativeMetricsSnapshot,
+  NativeMetricsUpdateListener,
+} from "../native/strata-metrics";
 import { StrataMetricsPoller } from "../native/strata-metrics";
 import {
   COUNT_STRATEGY_DEFAULT,
@@ -45,13 +48,22 @@ export class TokenSpeedEngine {
    */
   private _native: StrataMetricsPoller | null = null;
   /**
+   * Listener notified when a poll yields a changed native snapshot. Wired by
+   * the event manager so the footer can be redrawn while the stream is quiet
+   * (no text deltas → the delta-driven renderer never fires).
+   */
+  private _nativeListener: NativeMetricsUpdateListener | undefined;
+  /**
    * Whole-task wall-clock timer (monotonic, immune to clock changes).
-   * `_taskStart` is set when a user message starts; `_taskEnd` freezes
-   * the timer at agent_end. Distinct from the stream timer, so tool
-   * calls and multiple model turns all count toward Total.
+   * `_taskStart` is set when the user submits a prompt (`before_agent_start`);
+   * `_taskEnd` freezes the timer when the task settles (`agent_settled`).
+   * Distinct from the stream timer, so tool calls, retries, compaction, and
+   * queued continuation all count toward Total.
    */
   private _taskStart = 0;
   private _taskEnd = 0;
+  /** True once the task timer has been frozen for the current task. */
+  private _taskFinished = false;
 
   constructor() {
     this._slidingWindow = new SlidingWindow(SLIDING_WINDOW_DEFAULT);
@@ -99,8 +111,19 @@ export class TokenSpeedEngine {
     // Reconfigure the native metrics adapter (opt-in, per provider).
     this._native?.stop();
     this._native = config.nativeMetrics
-      ? new StrataMetricsPoller(config.nativeMetrics)
+      ? new StrataMetricsPoller(config.nativeMetrics, this._nativeListener)
       : null;
+  }
+
+  /**
+   * Registers the listener notified when a native poll yields a changed
+   * snapshot. Applied to the current adapter and to adapters created by later
+   * `applyConfig` calls (provider switches), so the redraw wiring survives a
+   * mid-session provider change.
+   */
+  setNativeUpdateListener(listener: NativeMetricsUpdateListener | undefined) {
+    this._nativeListener = listener;
+    this._native?.setOnUpdate(listener);
   }
 
   /**
@@ -198,9 +221,10 @@ export class TokenSpeedEngine {
   }
 
   /**
-   * Bounded end-of-stream fetch so the final status can use the server's own
-   * completed-request record. No-op (and never throws) when no adapter is
-   * configured, leaving the counter-based fallback untouched.
+   * Bounded end-of-task fetch (at `agent_settled`) so the final status can
+   * use the server's own completed-request record. No-op (and never throws)
+   * when no adapter is configured, leaving the counter-based fallback
+   * untouched.
    */
   async finalizeNativeMetrics(): Promise<void> {
     if (!this._native) return;
@@ -214,7 +238,8 @@ export class TokenSpeedEngine {
   /**
    * Arms the native metrics adapter for the request that is about to run.
    *
-   * Called when a user message starts, i.e. before model inference, so the
+   * Called when the user submits a prompt (`before_agent_start`), i.e. before
+   * model inference, so the
    * adapter can observe the server's prompt-processing phase and capture a
    * request baseline before this request finishes. No-op (and never polls)
    * when the active provider has no adapter configured.
@@ -237,37 +262,48 @@ export class TokenSpeedEngine {
   }
 
   /**
-   * Begins timing a new Pi task (reset on each user message).
+   * Begins timing a new Pi task (reset when the user submits a prompt).
    *
    * Uses `performance.now()` (monotonic) so system clock changes cannot
    * corrupt the measurement. The timer intentionally survives assistant
-   * streams, tool calls, and model turns — only a new user message or
-   * session shutdown clears it.
+   * streams, tool calls, and model turns — only a new submitted prompt or
+   * session shutdown clears it. Queued steering/follow-up messages do not
+   * restart it.
    */
   startTask(): void {
     this._taskStart = performance.now();
     this._taskEnd = 0;
+    this._taskFinished = false;
   }
 
   /**
-   * Freezes the task timer (called at agent_end) so the final status
-   * shows the total task duration. Idempotent: the first call wins.
+   * Freezes the task timer. Called at `agent_settled`, the event that marks
+   * the end of the whole submitted prompt (retries, compaction, and queued
+   * continuation included). Idempotent: the first call wins.
    */
   finishTask(): void {
     if (this._taskStart === 0) return;
-    if (this._taskEnd === 0) this._taskEnd = performance.now();
+    if (this._taskFinished) return;
+    this._taskEnd = performance.now();
+    this._taskFinished = true;
   }
 
   /** Clears task timer state (session shutdown). */
   clearTask(): void {
     this._taskStart = 0;
     this._taskEnd = 0;
+    this._taskFinished = false;
+  }
+
+  /** Whether the task timer is frozen (settled) for the current task. */
+  get isTaskFinished(): boolean {
+    return this._taskFinished;
   }
 
   /**
-   * Total elapsed seconds of the current Pi task since the user's
-   * message. Continues growing while the task is active; frozen after
-   * agent_end; 0 before any user message.
+   * Total elapsed seconds of the current Pi task since the prompt was
+   * submitted. Continues growing while the task is active; frozen once the
+   * task settles; 0 before any submitted prompt.
    */
   get taskElapsedSeconds(): number {
     if (this._taskStart === 0) return 0;
@@ -320,12 +356,31 @@ export class TokenSpeedEngine {
   }
 
   /**
-   * Stops streaming.
+   * Stops the stream counter only. Used at `agent_end`, which closes one
+   * assistant stream: the task is not over (queued continuation, tool calls,
+   * compaction, retries can follow), so the native poller keeps running
+   * until the task settles.
    */
-  stop(): void {
+  stopStreaming(): void {
     this._isStreaming = false;
     this._endTime = Date.now();
     this._slidingWindow.reset();
+  }
+
+  /**
+   * Stops streaming and the native metrics poller. Used for a full stop
+   * (session shutdown), not for `agent_end`.
+   */
+  stop(): void {
+    this.stopStreaming();
+    this.stopNativeMetrics();
+  }
+
+  /**
+   * Stops native polling. Called when the task settles (`agent_settled`) or
+   * the session shuts down — never at `agent_end`.
+   */
+  stopNativeMetrics(): void {
     this._native?.stop();
   }
 
