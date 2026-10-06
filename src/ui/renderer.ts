@@ -4,7 +4,32 @@ import { settings } from "../config/settings";
 import type { DisplayColors, TokenSpeedConfig } from "../config/types";
 import { TokenSpeedEngine } from "../core/engine";
 import { type DisplayMode } from "../settings/items/display";
+import type { NativeMetricsSnapshot } from "../native/strata-metrics";
 import { truecolor } from "./ansi";
+
+/**
+ * Formats a duration for the Gen/Total summary.
+ *
+ * Rules (no milliseconds):
+ * - < 60s: seconds with one decimal (36.6s, 42.3s)
+ * - 1m–1h: compact minutes + seconds (1m12s)
+ * - >= 1h: compact hours + minutes (1h03m)
+ */
+export function formatTaskDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+
+  const totalSec = Math.round(seconds);
+  if (totalSec < 3600) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}m${String(s).padStart(2, "0")}s`;
+  }
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  return `${h}h${String(m).padStart(2, "0")}m`;
+}
 
 /**
  * Options for rendering the stats suffix.
@@ -21,6 +46,8 @@ interface StatsFormatOptions {
  */
 export class Renderer {
   private lastUpdateTime = 0;
+  /** Last text published to the footer, used to skip redundant repaints. */
+  private lastText = "";
 
   /**
    * Creates a new Renderer bound to an engine.
@@ -60,6 +87,13 @@ export class Renderer {
     const config = settings.getEffectiveConfig(ctx.model?.provider);
     const theme = ctx.ui.theme;
 
+    // Server-native metrics (opt-in) take precedence over the counter.
+    const native = this.engine.nativeSnapshot;
+    if (native) {
+      this.renderNative(ctx, config, native);
+      return;
+    }
+
     // Render TPS first
     const { tps } = this.engine;
     const measurement = `${tps.toFixed(1)} tok/s`;
@@ -75,9 +109,82 @@ export class Renderer {
 
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
-    const text = `${prefix} ${displayValue}${suffix}`;
+    let text = `${prefix} ${displayValue}`;
 
+    // Live while the task runs, frozen at agent_settled: how long the whole
+    // Pi task took (prompt processing, model turns, tool calls).
+    const total = this.engine.taskElapsedSeconds;
+    if (!this.engine.isStreaming && total > 0) {
+      text += ` · Total ${formatTaskDuration(total)}`;
+    }
+    text += suffix;
+
+    this.publish(ctx, text);
+  }
+
+  /**
+   * Publishes the footer text through Pi's status API, which invalidates the
+   * TUI (`setStatus` → `requestRender`). Identical text is skipped so a poll
+   * that produced no meaningful change does not trigger a repaint.
+   */
+  private publish(ctx: ExtensionContext, text: string): void {
+    if (text === this.lastText) return;
+    this.lastText = text;
     ctx.ui.setStatus(STATUS_KEY, text);
+  }
+
+  /**
+   * Renders the compact server-native status.
+   *
+   * Live:      ⚡ 68.4 tok/s · Mean 64.9 · PP 1180 tok/s
+   * Finished:  ⚡ Mean 34.1 tok/s · 1248 tok · Gen 36.6s · Total 1m12s
+   *
+   * The tier color still applies to the headline rate, and the display-mode
+   * suffix (TTFT/stats) is preserved so existing configuration keeps working.
+   */
+  private renderNative(
+    ctx: ExtensionContext,
+    config: TokenSpeedConfig,
+    snapshot: NativeMetricsSnapshot,
+  ): void {
+    const icon = config.icon ? config.icon + " " : "";
+    const parts: string[] = [];
+
+    if (snapshot.completed) {
+      const mean = snapshot.meanTps || snapshot.liveTps;
+      parts.push(
+        "Mean " +
+          truecolor(mean.toFixed(1), this.getColor(config, mean)) +
+          " tok/s",
+      );
+      if (snapshot.outputTokens > 0) parts.push(snapshot.outputTokens + " tok");
+      // Gen is the server's decode duration (decode_ms / 1000); Total
+      // spans the whole Pi task (prompt processing, all model turns
+      // and tool calls) as measured by this extension.
+      if (snapshot.decodeSeconds > 0) {
+        parts.push("Gen " + formatTaskDuration(snapshot.decodeSeconds));
+      }
+      const total = this.engine.taskElapsedSeconds;
+      if (total > 0) parts.push("Total " + formatTaskDuration(total));
+    } else {
+      const live = snapshot.liveTps;
+      parts.push(
+        truecolor(live.toFixed(1), this.getColor(config, live)) + " tok/s",
+      );
+      if (snapshot.meanTps > 0) {
+        parts.push("Mean " + snapshot.meanTps.toFixed(1));
+      }
+      if (snapshot.prefillTps > 0) {
+        parts.push("PP " + Math.round(snapshot.prefillTps) + " tok/s");
+      }
+    }
+
+    const suffix = this.buildSuffix(config.display, {
+      formatDuration: config.formatDuration,
+      displayColors: config.displayColors,
+    });
+
+    this.publish(ctx, icon + parts.join(" · ") + suffix);
   }
 
   /**
@@ -222,6 +329,7 @@ export class Renderer {
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
     const text = `${prefix} --`;
+    this.lastText = text;
     ctx.ui.setStatus(STATUS_KEY, text);
   }
 
