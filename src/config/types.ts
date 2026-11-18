@@ -57,6 +57,22 @@ interface TokenSpeedConfigFields {
 }
 
 /**
+ * Optional server-native metrics adapter (opt-in, per provider).
+ *
+ * Local inference servers such as Strata expose their own throughput on a
+ * `/metrics` endpoint. When configured, the extension reads those numbers
+ * instead of estimating TPS from stream deltas.
+ */
+export interface NativeMetricsConfig {
+  /** Metrics endpoint, e.g. "http://127.0.0.1:8080/metrics". */
+  url: string;
+  /** Poll cadence in ms (default 300). */
+  intervalMs?: number;
+  /** Per-request fetch timeout in ms (default 500). */
+  timeoutMs?: number;
+}
+
+/**
  * Partial config that may override any top-level base key.
  * Omitted keys fall back to the base config at resolution time;
  * `thresholds`/`colors`/`displayColors` merge per-key.
@@ -68,6 +84,7 @@ export type ProviderOverride = Partial<
   colors?: Partial<Colors>;
   displayColors?: Partial<DisplayColors>;
   formatDuration?: boolean;
+  nativeMetrics?: NativeMetricsConfig;
 };
 
 /**
@@ -86,6 +103,8 @@ export interface ProviderOverrides {
 export interface TokenSpeedConfig extends TokenSpeedConfigFields {
   /** Per-provider config overrides, keyed by pi ProviderId. */
   providerOverrides: ProviderOverrides;
+  /** Native metrics adapter of the active provider (undefined when none). */
+  nativeMetrics?: NativeMetricsConfig;
 }
 
 /**

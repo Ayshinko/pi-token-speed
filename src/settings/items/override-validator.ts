@@ -1,6 +1,7 @@
 import type {
   Colors,
   DisplayColors,
+  NativeMetricsConfig,
   ProviderOverride,
   Thresholds,
   TierName,
@@ -11,6 +12,10 @@ import { COLOR_ITEMS } from "./colors";
 import { DISPLAY_COLOR_ITEMS } from "./display-colors";
 import { THRESHOLD_ITEMS } from "./thresholds";
 import { isAscendingThresholds, isValidHex } from "./tiers/validation";
+
+/** Bounds for the optional native metrics adapter (ms). */
+const NATIVE_METRICS_MIN_MS = 100;
+const NATIVE_METRICS_MAX_MS = 5000;
 
 /**
  * Validates a provider override block against a base config.
@@ -51,6 +56,7 @@ export class OverrideValidator {
     this.validateThresholds(cleaned, errors, drop);
     this.validateColors(cleaned, errors, drop);
     this.validateDisplayColors(cleaned, errors, drop);
+    this.validateNativeMetrics(cleaned, errors, drop);
 
     return { config: cleaned, errors };
   }
@@ -164,6 +170,51 @@ export class OverrideValidator {
     } else {
       delete cleaned.colors;
     }
+  }
+
+  /**
+   * nativeMetrics: validate the adapter block; drop it when unusable so the
+   * provider falls back to the regular stream-delta counter.
+   */
+  private validateNativeMetrics(
+    cleaned: ProviderOverride,
+    errors: string[],
+    drop: (key: string, detail: string) => void,
+  ): void {
+    if (cleaned.nativeMetrics === undefined) return;
+    const raw = cleaned.nativeMetrics;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      drop("nativeMetrics", "Invalid nativeMetrics (expected object)");
+      return;
+    }
+
+    const url = (raw as NativeMetricsConfig).url;
+    if (typeof url !== "string" || !/^https?:\/\/\S+$/.test(url)) {
+      drop(
+        "nativeMetrics",
+        "Invalid nativeMetrics.url (expected an http(s) URL)",
+      );
+      return;
+    }
+
+    const clean: NativeMetricsConfig = { url };
+    for (const key of ["intervalMs", "timeoutMs"] as const) {
+      const value = (raw as NativeMetricsConfig)[key];
+      if (value === undefined) continue;
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < NATIVE_METRICS_MIN_MS ||
+        value > NATIVE_METRICS_MAX_MS
+      ) {
+        errors.push(
+          `- providerOverrides["${this.providerId}"]: Invalid nativeMetrics.${key} "${value}" (expected ${NATIVE_METRICS_MIN_MS}-${NATIVE_METRICS_MAX_MS}) — using default.`,
+        );
+        continue;
+      }
+      clean[key] = value;
+    }
+    cleaned.nativeMetrics = clean;
   }
 
   /** DisplayColors: keep only valid keys with hex values. */
